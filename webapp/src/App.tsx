@@ -7,6 +7,8 @@ import WorkerTable from './components/WorkerTable'
 import WorkerDetail from './components/WorkerDetail'
 import MappingDialog from './components/MappingDialog'
 import HelpPanel from './components/HelpPanel'
+import LoginPage from './components/LoginPage'
+import ChangePasswordPage from './components/ChangePasswordPage'
 import { parseWorkbook } from './payroll/parser'
 import { computePayroll, DEFAULT_CONFIG } from './payroll/engine'
 import { summarizePeriod, summarizeWorkers } from './payroll/aggregate'
@@ -14,11 +16,14 @@ import { exportDailyXlsx, exportWorkerSummaryXlsx, exportBankCsv } from './payro
 import { downloadTemplate } from './payroll/template'
 import { saveMapping, type ColumnMapping } from './payroll/mapping'
 import type { ParsedWorkbook, PayrollResult, WorkerSummary } from './payroll/types'
-import { AlertTriangle, Sparkles, Settings, CheckCircle2 } from 'lucide-react'
+import { AlertTriangle, Sparkles, Settings, CheckCircle2, LogOut, User } from 'lucide-react'
 import { useI18n } from './i18n/I18n'
+import { useAuth } from './auth/useAuth'
 
 function App() {
   const { t } = useI18n()
+  const auth = useAuth()
+
   const [workbook, setWorkbook] = useState<ParsedWorkbook | null>(null)
   const [pendingBuffer, setPendingBuffer] = useState<{ buf: ArrayBuffer; name: string } | null>(null)
   const [pendingHeaders, setPendingHeaders] = useState<{ headers: (string | null)[]; mapping: ColumnMapping } | null>(null)
@@ -37,6 +42,23 @@ function App() {
     const workers = summarizeWorkers(rows, workbook.members)
     return { rows, summary, workers }
   }, [workbook, config])
+
+  // Auth gates
+  if (auth.loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  if (!auth.user) {
+    return <LoginPage onLogin={auth.login} />
+  }
+
+  if (auth.user.force_password_change) {
+    return <ChangePasswordPage onChangePassword={auth.changePassword} />
+  }
 
   async function handleFile(buf: ArrayBuffer, name: string) {
     setLoading(true)
@@ -79,9 +101,36 @@ function App() {
     setPendingBuffer(null)
   }
 
+  const roleLabel: Record<string, string> = {
+    super_admin: 'Super Admin',
+    country_admin: 'Country Admin',
+    hr: 'HR',
+    supervisor: 'Supervisor',
+    viewer: 'Viewer',
+  }
+
   return (
     <div className="min-h-screen flex flex-col">
-      <Header onOpenHelp={() => setHelpTab('guide')} />
+      <Header onOpenHelp={() => setHelpTab('guide')}>
+        {/* User badge in header */}
+        <div className="flex items-center gap-2 ml-auto">
+          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 text-xs text-slate-600">
+            <User size={12} />
+            <span>{auth.user.email}</span>
+            <span className="px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
+              {roleLabel[auth.user.role] ?? auth.user.role}
+            </span>
+          </div>
+          <button
+            onClick={auth.logout}
+            className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+            title="Sign out"
+          >
+            <LogOut size={16} />
+          </button>
+        </div>
+      </Header>
+
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-8 space-y-4 sm:space-y-6">
         {!workbook && !pendingHeaders && (
           <>

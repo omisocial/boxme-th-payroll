@@ -5,15 +5,33 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:pages": "wrangler pages dev --compatibility-date=2026-04-30 -- vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "db:create": "wrangler d1 create boxme-payroll",
+    "db:migrate": "npm run db:migrate:001 && npm run db:migrate:002 && npm run db:migrate:003 && npm run db:migrate:004 && npm run db:migrate:005 && npm run db:migrate:006 && npm run db:migrate:007",
+    "db:migrate:001": "wrangler d1 execute boxme-payroll --file=../api/src/db/001_foundation.sql",
+    "db:migrate:002": "wrangler d1 execute boxme-payroll --file=../api/src/db/002_workers.sql",
+    "db:migrate:003": "wrangler d1 execute boxme-payroll --file=../api/src/db/003_compensation.sql",
+    "db:migrate:004": "wrangler d1 execute boxme-payroll --file=../api/src/db/004_attendance.sql",
+    "db:migrate:005": "wrangler d1 execute boxme-payroll --file=../api/src/db/005_payroll.sql",
+    "db:migrate:006": "wrangler d1 execute boxme-payroll --file=../api/src/db/006_exports.sql",
+    "db:migrate:007": "wrangler d1 execute boxme-payroll --file=../api/src/db/007_auth.sql",
+    "db:seed": "npx tsx scripts/gen-seed-passwords.ts && wrangler d1 execute boxme-payroll --file=../api/src/db/008_seed_ready.sql",
+    "db:migrate:local": "npm run db:migrate:001 -- --local && npm run db:migrate:002 -- --local && npm run db:migrate:003 -- --local && npm run db:migrate:004 -- --local && npm run db:migrate:005 -- --local && npm run db:migrate:006 -- --local && npm run db:migrate:007 -- --local",
+    "db:seed:local": "npx tsx scripts/gen-seed-passwords.ts && wrangler d1 execute boxme-payroll --local --file=../api/src/db/008_seed_ready.sql",
+    "deploy": "npm run build && wrangler pages deploy dist"
   },
   "dependencies": {
+    "@hono/zod-validator": "^0.7.6",
+    "better-auth": "^1.6.9",
+    "hono": "^4.12.15",
     "lucide-react": "^1.14.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zod": "^4.4.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

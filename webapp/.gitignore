@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Seed passwords — never commit
+.env.seed
+../api/src/db/008_seed_ready.sql
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
