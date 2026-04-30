@@ -23,6 +23,21 @@ const workerCreateSchema = z.object({
   notes: z.string().optional(),
 })
 
+// GET /api/warehouses — list warehouses by country (used in period create dialog)
+workersRouter.get('/warehouses', ...guard('viewer'), async (c) => {
+  const sb = getSupabase(c.env)
+  const user = c.get('user')
+  const country = user.country_scope === '*' ? (c.req.query('country') ?? 'TH') : user.country_scope
+
+  const { data, error } = await sb.from('warehouses')
+    .select('id, name, country_code')
+    .eq('country_code', country)
+    .order('name')
+
+  if (error) return c.json({ success: false, message: error.message }, 500)
+  return c.json({ success: true, data: data ?? [] })
+})
+
 // GET /api/workers
 workersRouter.get('/', ...guard('viewer'), async (c) => {
   const sb = getSupabase(c.env)

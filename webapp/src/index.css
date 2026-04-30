@@ -33,6 +33,9 @@ html, body, #root {
   .pill {
     @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
   }
+  .input {
+    @apply px-3 py-2 text-sm rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition;
+  }
 }
 
 /* Custom scrollbar */

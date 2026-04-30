@@ -16,14 +16,20 @@ import { exportDailyXlsx, exportWorkerSummaryXlsx, exportBankCsv } from './payro
 import { downloadTemplate } from './payroll/template'
 import { saveMapping, type ColumnMapping } from './payroll/mapping'
 import type { ParsedWorkbook, PayrollResult, WorkerSummary } from './payroll/types'
-import { AlertTriangle, Sparkles, Settings, CheckCircle2, LogOut, User } from 'lucide-react'
+import { AlertTriangle, Sparkles, Settings, CheckCircle2, LogOut, User, BarChart2, Users, Shield } from 'lucide-react'
 import { useI18n } from './i18n/I18n'
 import { useAuth } from './auth/useAuth'
+import PeriodsPage from './components/periods/PeriodsPage'
+import WorkersPage from './components/workers/WorkersPage'
+import AdminPage from './components/admin/AdminPage'
+
+type View = 'payroll' | 'periods' | 'workers' | 'admin'
 
 function App() {
   const { t } = useI18n()
   const auth = useAuth()
 
+  const [view, setView] = useState<View>('payroll')
   const [workbook, setWorkbook] = useState<ParsedWorkbook | null>(null)
   const [pendingBuffer, setPendingBuffer] = useState<{ buf: ArrayBuffer; name: string } | null>(null)
   const [pendingHeaders, setPendingHeaders] = useState<{ headers: (string | null)[]; mapping: ColumnMapping } | null>(null)
@@ -109,6 +115,15 @@ function App() {
     viewer: 'Viewer',
   }
 
+  const canAdmin = auth.user.role === 'super_admin' || auth.user.role === 'country_admin'
+
+  const navTabs: { id: View; label: string; icon: React.ReactNode }[] = [
+    { id: 'payroll', label: 'Payroll', icon: <Sparkles size={14} /> },
+    { id: 'periods', label: 'Periods', icon: <BarChart2 size={14} /> },
+    { id: 'workers', label: 'Workers', icon: <Users size={14} /> },
+    ...(canAdmin ? [{ id: 'admin' as View, label: 'Admin', icon: <Shield size={14} /> }] : []),
+  ]
+
   return (
     <div className="min-h-screen flex flex-col">
       <Header onOpenHelp={() => setHelpTab('guide')}>
@@ -131,8 +146,31 @@ function App() {
         </div>
       </Header>
 
+      {/* Tab navigation */}
+      <div className="bg-white border-b border-slate-200 sticky top-[57px] sm:top-[73px] z-20">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 flex gap-0.5 overflow-x-auto">
+          {navTabs.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setView(tab.id)}
+              className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition -mb-px ${
+                view === tab.id
+                  ? 'border-blue-600 text-blue-700'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+              }`}
+            >
+              {tab.icon} {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-8 space-y-4 sm:space-y-6">
-        {!workbook && !pendingHeaders && (
+        {view === 'periods' && <PeriodsPage user={auth.user} />}
+        {view === 'workers' && <WorkersPage user={auth.user} />}
+        {view === 'admin' && canAdmin && <AdminPage user={auth.user} />}
+
+        {view === 'payroll' && !workbook && !pendingHeaders && (
           <>
             <div className="text-center max-w-2xl mx-auto pt-2 sm:pt-8">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-medium mb-3 sm:mb-4">
@@ -156,7 +194,7 @@ function App() {
           </>
         )}
 
-        {workbook && computed && (
+        {view === 'payroll' && workbook && computed && (
           <>
             <Toolbar
               fileName={workbook.fileName}

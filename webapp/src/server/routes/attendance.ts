@@ -155,34 +155,76 @@ attendanceRouter.post('/import', ...guard('hr'), async (c) => {
     console.warn('[import] Storage upload failed (bucket may not exist yet)')
   }
 
-  // Parse Excel
+  // Parse Excel — mirrors frontend parser.ts logic
   const { read, utils } = await import('xlsx')
-  const wb = read(new Uint8Array(bytes), { type: 'array' })
+  const wb = read(new Uint8Array(bytes), { type: 'array', cellDates: false })
 
   const previewRows: Array<Record<string, unknown>> = []
   const warnings: string[] = []
+  const yearMonth = c.req.query('yearMonth') // optional "YYYY-MM" for date fallback
 
+  // Default column indices matching DEFAULT_MAPPING in mapping.ts
+  const COL = { fullName: 1, checkin: 2, checkout: 3, note: 4, nickname: 5, shiftCode: 17 }
+
+  // Convert Excel time/datetime serial to "HH:MM" string
+  const toTimeStr = (v: unknown): string | undefined => {
+    if (typeof v === 'number') {
+      const frac = v % 1
+      const totalSec = Math.round(frac * 86400)
+      const h = Math.floor(totalSec / 3600)
+      const min = Math.floor((totalSec % 3600) / 60)
+      return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`
+    }
+    if (typeof v === 'string' && v.trim()) return v.trim()
+    return undefined
+  }
+
+  const DAILY_SHEET_RE = /^วันที่\s*(\d+)/i
   for (const sheetName of wb.SheetNames) {
-    if (!sheetName.includes('วันที่') && !sheetName.match(/day\s*\d+/i)) continue
-    const ws = wb.Sheets[sheetName]
-    const rows = utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: false })
+    const m = sheetName.match(DAILY_SHEET_RE)
+    if (!m) continue
+    const dayNum = parseInt(m[1], 10)
 
-    for (let i = 1; i < rows.length; i++) {
+    const ws = wb.Sheets[sheetName]
+    // raw:true preserves Excel numeric serials so we can extract date from checkin
+    const rows = utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: true, defval: null })
+
+    // Header is at index 7, data starts at index 8 (same as frontend parser)
+    for (let i = 8; i < rows.length; i++) {
       const row = rows[i] as unknown[]
-      if (!row || !row[1]) continue
+      if (!row) continue
+      const fullName = row[COL.fullName] != null ? String(row[COL.fullName]).trim() : ''
+      if (fullName.length < 2) continue
+
+      // Parse work date from checkin serial integer part (date + time combined)
+      let workDate = ''
+      const checkinRaw = row[COL.checkin]
+      if (typeof checkinRaw === 'number' && Math.floor(checkinRaw) > 1) {
+        const days = Math.floor(checkinRaw)
+        const ms = Date.UTC(1899, 11, 30) + days * 86400000
+        workDate = new Date(ms).toISOString().slice(0, 10)
+      }
+      if (!workDate) {
+        const ym = yearMonth && /^\d{4}-\d{2}$/.test(yearMonth)
+          ? yearMonth
+          : new Date().toISOString().slice(0, 7)
+        workDate = `${ym}-${String(dayNum).padStart(2, '0')}`
+      }
 
       previewRows.push({
         rowIndex: i,
         sheet: sheetName,
-        workDate: '',
-        fullName: String(row[1] ?? '').trim(),
-        checkin: row[3] ? String(row[3]).trim() : undefined,
-        checkout: row[4] ? String(row[4]).trim() : undefined,
-        note: row[5] ? String(row[5]).trim() : undefined,
-        shiftCode: row[2] ? String(row[2]).trim() : undefined,
+        workDate,
+        fullName,
+        checkin: toTimeStr(row[COL.checkin]),
+        checkout: toTimeStr(row[COL.checkout]),
+        note: row[COL.note] != null ? String(row[COL.note]).trim() : undefined,
+        shiftCode: row[COL.shiftCode] != null ? String(row[COL.shiftCode]).trim() : undefined,
+        nickname: row[COL.nickname] != null ? String(row[COL.nickname]).trim() : undefined,
       })
     }
   }
+  if (previewRows.length === 0) warnings.push('No daily sheets (วันที่ N) found in workbook.')
 
   // Store import session with preview rows in DB
   const { error } = await sb.from('import_sessions').insert({
@@ -227,24 +269,39 @@ attendanceRouter.post('/import/commit', ...guard('hr'), async (c) => {
   const rows = (s['preview_json'] as Array<Record<string, unknown>>) ?? []
   const warehouseId = s['warehouse_id'] as string
 
+  // Build full_name → worker_id lookup for this country
+  const { data: workerRows } = await sb.from('workers')
+    .select('id, name_local')
+    .eq('country_code', country)
+    .is('deleted_at', null)
+  const nameToWorkerId: Record<string, string> = {}
+  for (const w of workerRows ?? []) {
+    const ww = w as Record<string, unknown>
+    nameToWorkerId[ww['name_local'] as string] = ww['id'] as string
+  }
+
   let imported = 0, skipped = 0
   const errors: string[] = []
   const BATCH = 200
 
   for (let i = 0; i < rows.length; i += BATCH) {
     const chunk = rows.slice(i, i + BATCH)
-    const records = chunk.map(row => ({
-      country_code: country,
-      warehouse_id: warehouseId,
-      work_date: String(row['workDate'] ?? ''),
-      full_name: String(row['fullName'] ?? ''),
-      checkin: row['checkin'] ?? null,
-      checkout: row['checkout'] ?? null,
-      note: row['note'] ?? null,
-      shift_code: row['shiftCode'] ?? null,
-      import_batch_id: importSessionId,
-      created_by: user.email,
-    }))
+    const records = chunk.map(row => {
+      const fullName = String(row['fullName'] ?? '')
+      return {
+        country_code: country,
+        warehouse_id: warehouseId,
+        worker_id: nameToWorkerId[fullName] ?? null,
+        work_date: String(row['workDate'] ?? ''),
+        full_name: fullName,
+        checkin: row['checkin'] ?? null,
+        checkout: row['checkout'] ?? null,
+        note: row['note'] ?? null,
+        shift_code: row['shiftCode'] ?? null,
+        import_batch_id: importSessionId,
+        created_by: user.email,
+      }
+    })
 
     const { error } = await sb.from('attendance_records').insert(records)
     if (error) {
