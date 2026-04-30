@@ -3,38 +3,21 @@ compatibility_date = "2026-04-30"
 compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "./dist"
 
-# ─── Bindings ──────────────────────────────────────────────────────────────────
+# ─── Environment variables ─────────────────────────────────────────────────────
 
-[[d1_databases]]
-binding = "DB"
-database_name = "boxme-payroll"
-database_id = "4f9ad1d5-309e-40c2-81e6-8e409e62d087"
-
-# R2: enable at dashboard.cloudflare.com → R2 → Create bucket "boxme-payroll-files"
-# then uncomment:
-# [[r2_buckets]]
-# binding = "FILES"
-# bucket_name = "boxme-payroll-files"
-
-[[kv_namespaces]]
-binding = "SESSION_KV"
-id = "bab0128ddbe648c29faa15dad4b3fb1b"
-
-# ─── Environment variables (non-secret) ────────────────────────────────────────
 [vars]
 DEFAULT_COUNTRY = "TH"
 APP_URL = "https://payroll.boxme.tech"
+SUPABASE_URL = "https://zdpxjgrvjapezyihunzn.supabase.co"
 
-# Secrets (set via: wrangler secret put RESEND_API_KEY)
+# Secrets — set via: wrangler secret put <NAME>
+# SUPABASE_SERVICE_ROLE_KEY
 # RESEND_API_KEY
 # CRON_SECRET
 
-# ─── Cron Triggers ─────────────────────────────────────────────────────────────
-# Uncomment after Workers Paid plan or move to Cron Trigger in Pages
-# [triggers]
-# crons = ["0 1 * * *"]   # 01:00 UTC daily — nightly payroll recompute
-
 # ─── Dev local overrides ───────────────────────────────────────────────────────
+# Create webapp/.dev.vars with:
+#   SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>
 [dev]
 port = 8788
 local_protocol = "http"

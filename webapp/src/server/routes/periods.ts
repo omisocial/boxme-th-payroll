@@ -3,6 +3,7 @@ import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
 import { guard, type Env } from '../auth/rbac'
 import { appendAuditLog } from '../db/queries'
+import { getSupabase, storageUpload, storageDownload, type SB } from '../db/supabase'
 
 const periodsRouter = new Hono<{ Bindings: Env }>()
 
@@ -10,63 +11,88 @@ const createSchema = z.object({
   name: z.string().min(1),
   fromDate: z.string(),
   toDate: z.string(),
-  warehouseId: z.string().optional(),
+  warehouseId: z.string().uuid().optional(),
   country: z.string().default('TH'),
 })
 
 // GET /api/periods
 periodsRouter.get('/', ...guard('viewer'), async (c) => {
+  const sb = getSupabase(c.env)
   const user = c.get('user')
   const country = user.country_scope === '*' ? (c.req.query('country') ?? 'TH') : user.country_scope
   const status = c.req.query('status')
 
-  let query = `SELECT p.*,
-    (SELECT COUNT(*) FROM payroll_period_lines WHERE period_id = p.id) as worker_count,
-    (SELECT SUM(net_pay_thb) FROM payroll_period_lines WHERE period_id = p.id) as total_net_thb
-    FROM payroll_periods p WHERE p.country_code = ?`
-  const params: unknown[] = [country]
+  let query = sb.from('payroll_periods')
+    .select(`
+      *,
+      payroll_period_lines(count),
+      total_net:payroll_period_lines(net_pay_thb.sum())
+    `)
+    .eq('country_code', country)
+    .order('from_date', { ascending: false })
+    .limit(50)
 
-  if (status) { query += ` AND p.status = ?`; params.push(status) }
-  query += ` ORDER BY p.from_date DESC LIMIT 50`
+  if (status) query = query.eq('status', status)
 
-  const { results } = await c.env.DB.prepare(query).bind(...params).all<Record<string, unknown>>()
-  return c.json({ success: true, data: results ?? [] })
+  const { data, error } = await query
+  if (error) {
+    // Fallback: select without aggregates if not supported
+    const { data: simple } = await sb.from('payroll_periods')
+      .select('*')
+      .eq('country_code', country)
+      .order('from_date', { ascending: false })
+      .limit(50)
+    return c.json({ success: true, data: simple ?? [] })
+  }
+
+  return c.json({ success: true, data: data ?? [] })
 })
 
 // POST /api/periods
 periodsRouter.post('/', ...guard('hr'), zValidator('json', createSchema), async (c) => {
+  const sb = getSupabase(c.env)
   const user = c.get('user')
   const body = c.req.valid('json')
   const country = user.country_scope === '*' ? body.country : user.country_scope
-  const id = crypto.randomUUID()
 
-  await c.env.DB.prepare(`
-    INSERT INTO payroll_periods (id, country_code, warehouse_id, name, from_date, to_date, created_by)
-    VALUES (?,?,?,?,?,?,?)
-  `).bind(id, country, body.warehouseId ?? null, body.name, body.fromDate, body.toDate, user.email).run()
+  const { data: created, error } = await sb.from('payroll_periods')
+    .insert({
+      country_code: country,
+      warehouse_id: body.warehouseId ?? null,
+      name: body.name,
+      from_date: body.fromDate,
+      to_date: body.toDate,
+      created_by: user.email,
+    })
+    .select()
+    .single()
 
-  const created = await c.env.DB.prepare('SELECT * FROM payroll_periods WHERE id = ?').bind(id).first()
+  if (error) return c.json({ success: false, message: error.message }, 500)
   return c.json({ success: true, data: created }, 201)
 })
 
 // POST /api/periods/:id/lock
 periodsRouter.post('/:id/lock', ...guard('hr'), async (c) => {
+  const sb = getSupabase(c.env)
   const user = c.get('user')
   const id = c.req.param('id')
 
-  const period = await c.env.DB.prepare('SELECT * FROM payroll_periods WHERE id = ?')
-    .bind(id).first<{ status: string }>()
+  const { data: period } = await sb.from('payroll_periods')
+    .select('status, country_code')
+    .eq('id', id)
+    .maybeSingle()
+
   if (!period) return c.json({ success: false, message: 'Not found' }, 404)
-  if (period.status !== 'open') return c.json({ success: false, message: 'Period must be open to lock' }, 400)
+  const p = period as Record<string, unknown>
+  if (p['status'] !== 'open') return c.json({ success: false, message: 'Period must be open to lock' }, 400)
 
-  // Aggregate payroll_period_lines from payroll_daily
-  await aggregatePeriodLines(c.env.DB, id, user.country_scope === '*' ? 'TH' : user.country_scope)
+  await aggregatePeriodLines(sb, id, p['country_code'] as string)
 
-  await c.env.DB.prepare(`
-    UPDATE payroll_periods SET status='locked', locked_at=datetime('now'), locked_by=? WHERE id=?
-  `).bind(user.email, id).run()
+  await sb.from('payroll_periods')
+    .update({ status: 'locked', locked_at: new Date().toISOString(), locked_by: user.email })
+    .eq('id', id)
 
-  await appendAuditLog(c.env.DB, {
+  await appendAuditLog(sb, {
     user_id: user.id, user_email: user.email,
     action: 'lock', entity: 'payroll_period', entity_id: id,
   })
@@ -75,19 +101,24 @@ periodsRouter.post('/:id/lock', ...guard('hr'), async (c) => {
 
 // POST /api/periods/:id/approve
 periodsRouter.post('/:id/approve', ...guard('country_admin'), async (c) => {
+  const sb = getSupabase(c.env)
   const user = c.get('user')
   const id = c.req.param('id')
 
-  const period = await c.env.DB.prepare('SELECT * FROM payroll_periods WHERE id = ?')
-    .bind(id).first<{ status: string }>()
+  const { data: period } = await sb.from('payroll_periods')
+    .select('status')
+    .eq('id', id)
+    .maybeSingle()
+
   if (!period) return c.json({ success: false, message: 'Not found' }, 404)
-  if (period.status !== 'locked') return c.json({ success: false, message: 'Period must be locked to approve' }, 400)
+  const p = period as Record<string, unknown>
+  if (p['status'] !== 'locked') return c.json({ success: false, message: 'Period must be locked to approve' }, 400)
 
-  await c.env.DB.prepare(`
-    UPDATE payroll_periods SET status='approved', approved_at=datetime('now'), approved_by=? WHERE id=?
-  `).bind(user.email, id).run()
+  await sb.from('payroll_periods')
+    .update({ status: 'approved', approved_at: new Date().toISOString(), approved_by: user.email })
+    .eq('id', id)
 
-  await appendAuditLog(c.env.DB, {
+  await appendAuditLog(sb, {
     user_id: user.id, user_email: user.email,
     action: 'approve', entity: 'payroll_period', entity_id: id,
   })
@@ -96,148 +127,240 @@ periodsRouter.post('/:id/approve', ...guard('country_admin'), async (c) => {
 
 // POST /api/periods/:id/export?bank=K-BANK
 periodsRouter.post('/:id/export', ...guard('hr'), async (c) => {
+  const sb = getSupabase(c.env)
   const user = c.get('user')
   const id = c.req.param('id')
   const bankCode = c.req.query('bank') ?? 'K-BANK'
 
-  const period = await c.env.DB.prepare('SELECT * FROM payroll_periods WHERE id = ?')
-    .bind(id).first<{ status: string; country_code: string; name: string; from_date: string; to_date: string }>()
-  if (!period) return c.json({ success: false, message: 'Not found' }, 404)
-  if (period.status !== 'approved') return c.json({ success: false, message: 'Period must be approved before export' }, 400)
+  const { data: period } = await sb.from('payroll_periods')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle()
 
-  const template = await c.env.DB.prepare(
-    'SELECT * FROM bank_export_templates WHERE country_code = ? AND bank_code = ? AND active = 1'
-  ).bind(period.country_code, bankCode).first<{ columns_json: string; format: string; encoding: string; bank_name: string }>()
+  if (!period) return c.json({ success: false, message: 'Not found' }, 404)
+  const p = period as Record<string, unknown>
+  if (p['status'] !== 'approved') return c.json({ success: false, message: 'Period must be approved before export' }, 400)
+
+  const { data: template } = await sb.from('bank_export_templates')
+    .select('*')
+    .eq('country_code', p['country_code'])
+    .eq('bank_code', bankCode)
+    .eq('active', true)
+    .maybeSingle()
 
   if (!template) return c.json({ success: false, message: `No template for bank: ${bankCode}` }, 404)
+  const t = template as Record<string, unknown>
 
-  const { results: lines } = await c.env.DB.prepare(
-    'SELECT * FROM payroll_period_lines WHERE period_id = ? ORDER BY full_name'
-  ).bind(id).all<Record<string, unknown>>()
+  const { data: lines } = await sb.from('payroll_period_lines')
+    .select('*')
+    .eq('period_id', id)
+    .order('full_name')
 
-  const columns = JSON.parse(template.columns_json) as Array<{ header: string; field: string }>
-  const rows: string[][] = [columns.map(c => c.header)]
+  const columns = (t['columns_json'] as Array<{ header: string; field: string }>) ?? []
+  const rows: string[][] = [columns.map(col => col.header)]
 
   for (const line of lines ?? []) {
+    const l = line as Record<string, unknown>
     rows.push(columns.map(col => {
-      if (col.field === 'period_name') return period.name
-      const val = line[col.field]
+      if (col.field === 'period_name') return String(p['name'] ?? '')
+      const val = l[col.field]
       return val != null ? String(val) : ''
     }))
   }
 
   const csv = rows.map(r => r.map(v => `"${v.replace(/"/g, '""')}"`).join(',')).join('\n')
-  const filename = `${period.name.replace(/\s+/g, '_')}_${bankCode}_${new Date().toISOString().split('T')[0]}.csv`
-  const r2Key = `exports/${id}/${filename}`
+  const filename = `${String(p['name']).replace(/\s+/g, '_')}_${bankCode}_${new Date().toISOString().split('T')[0]}.csv`
+  const storagePath = `${String(p['country_code'])}/${id}/${filename}`
 
-  await c.env.FILES.put(r2Key, csv, { httpMetadata: { contentType: 'text/csv; charset=utf-8' } })
+  try {
+    await storageUpload(sb, 'payroll-exports', storagePath, csv, 'text/csv; charset=utf-8')
+  } catch {
+    console.warn('[export] Storage upload failed (bucket may not exist yet)')
+  }
 
-  const exportId = crypto.randomUUID()
-  await c.env.DB.prepare(`
-    INSERT INTO bank_exports (id, period_id, bank_code, filename, r2_key, row_count, total_thb, created_by)
-    VALUES (?,?,?,?,?,?,?,?)
-  `).bind(
-    exportId, id, bankCode, filename, r2Key,
-    lines?.length ?? 0,
-    lines?.reduce((s, l) => s + ((l['net_pay_thb'] as number) || 0), 0) ?? 0,
-    user.email
-  ).run()
+  const { data: exportRow, error: exportErr } = await sb.from('bank_exports')
+    .insert({
+      period_id: id,
+      bank_code: bankCode,
+      filename,
+      storage_path: storagePath,
+      row_count: lines?.length ?? 0,
+      total_thb: (lines ?? []).reduce((s, l) => s + (Number((l as Record<string, unknown>)['net_pay_thb']) || 0), 0),
+      created_by: user.email,
+    })
+    .select('id')
+    .single()
 
-  await c.env.DB.prepare(
-    `UPDATE payroll_periods SET status='exported', updated_at=datetime('now') WHERE id=?`
-  ).bind(id).run()
+  if (exportErr) return c.json({ success: false, message: exportErr.message }, 500)
 
-  await appendAuditLog(c.env.DB, {
+  await sb.from('payroll_periods')
+    .update({ status: 'exported', updated_at: new Date().toISOString() })
+    .eq('id', id)
+
+  await appendAuditLog(sb, {
     user_id: user.id, user_email: user.email,
     action: 'export', entity: 'payroll_period', entity_id: id,
     after: { bank: bankCode, filename, rows: lines?.length },
   })
 
+  const exportId = (exportRow as Record<string, unknown>)['id'] as string
   return c.json({ success: true, data: { exportId, filename, rowCount: lines?.length ?? 0 } })
 })
 
 // GET /api/periods/:id/exports
 periodsRouter.get('/:id/exports', ...guard('viewer'), async (c) => {
-  const { results } = await c.env.DB.prepare(
-    'SELECT * FROM bank_exports WHERE period_id = ? ORDER BY created_at DESC'
-  ).bind(c.req.param('id')).all<Record<string, unknown>>()
-  return c.json({ success: true, data: results ?? [] })
+  const sb = getSupabase(c.env)
+  const { data } = await sb.from('bank_exports')
+    .select('*')
+    .eq('period_id', c.req.param('id'))
+    .order('created_at', { ascending: false })
+  return c.json({ success: true, data: data ?? [] })
 })
 
-// GET /api/exports/:exportId/download — R2 signed URL (15min)
+// GET /api/periods/exports/:exportId/download — stream from Supabase Storage
 periodsRouter.get('/exports/:exportId/download', ...guard('hr'), async (c) => {
-  const row = await c.env.DB.prepare('SELECT * FROM bank_exports WHERE id = ?')
-    .bind(c.req.param('exportId')).first<{ r2_key: string; filename: string }>()
+  const sb = getSupabase(c.env)
+  const { data: row } = await sb.from('bank_exports')
+    .select('storage_path, filename')
+    .eq('id', c.req.param('exportId'))
+    .maybeSingle()
+
   if (!row) return c.json({ success: false, message: 'Not found' }, 404)
+  const r = row as Record<string, unknown>
 
-  // In Workers, stream R2 object directly (no signed URL on free tier)
-  const obj = await c.env.FILES.get(row.r2_key)
-  if (!obj) return c.json({ success: false, message: 'File not found in storage' }, 404)
-
-  const content = await obj.text()
-  return new Response(content, {
-    headers: {
-      'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${row.filename}"`,
-    },
-  })
+  try {
+    const content = await storageDownload(sb, 'payroll-exports', r['storage_path'] as string)
+    return new Response(content, {
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${r['filename']}"`,
+      },
+    })
+  } catch {
+    return c.json({ success: false, message: 'File not found in storage' }, 404)
+  }
 })
 
-// GET /api/reports/period-summary/:id
+// GET /api/periods/summary/:id
 periodsRouter.get('/summary/:id', ...guard('viewer'), async (c) => {
+  const sb = getSupabase(c.env)
   const id = c.req.param('id')
 
-  const period = await c.env.DB.prepare('SELECT * FROM payroll_periods WHERE id = ?').bind(id).first<Record<string, unknown>>()
+  const { data: period } = await sb.from('payroll_periods')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle()
+
   if (!period) return c.json({ success: false, message: 'Not found' }, 404)
 
-  const stats = await c.env.DB.prepare(`
-    SELECT
-      COUNT(*) as worker_count,
-      SUM(total_gross_thb) as total_gross,
-      SUM(total_ot_thb) as total_ot,
-      SUM(total_late_thb) as total_late,
-      SUM(total_damage_thb) as total_damage,
-      SUM(net_pay_thb) as total_net,
-      SUM(shifts) as total_shifts
-    FROM payroll_period_lines WHERE period_id = ?
-  `).bind(id).first<Record<string, number>>()
+  const { data: lines } = await sb.from('payroll_period_lines')
+    .select('total_gross_thb, total_ot_thb, total_late_thb, total_damage_thb, net_pay_thb, shifts')
+    .eq('period_id', id)
+
+  const stats = (lines ?? []).reduce((acc, l: Record<string, unknown>) => {
+    acc.worker_count++
+    acc.total_gross = (acc.total_gross ?? 0) + (Number(l['total_gross_thb']) || 0)
+    acc.total_ot = (acc.total_ot ?? 0) + (Number(l['total_ot_thb']) || 0)
+    acc.total_late = (acc.total_late ?? 0) + (Number(l['total_late_thb']) || 0)
+    acc.total_damage = (acc.total_damage ?? 0) + (Number(l['total_damage_thb']) || 0)
+    acc.total_net = (acc.total_net ?? 0) + (Number(l['net_pay_thb']) || 0)
+    acc.total_shifts = (acc.total_shifts ?? 0) + (Number(l['shifts']) || 0)
+    return acc
+  }, { worker_count: 0, total_gross: 0, total_ot: 0, total_late: 0, total_damage: 0, total_net: 0, total_shifts: 0 })
 
   return c.json({ success: true, data: { period, stats } })
 })
 
-async function aggregatePeriodLines(db: D1Database, periodId: string, country: string) {
-  const period = await db.prepare('SELECT * FROM payroll_periods WHERE id = ?')
-    .bind(periodId).first<{ from_date: string; to_date: string }>()
+async function aggregatePeriodLines(sb: SB, periodId: string, country: string) {
+  const { data: period } = await sb.from('payroll_periods')
+    .select('from_date, to_date')
+    .eq('id', periodId)
+    .maybeSingle()
+
   if (!period) return
+  const p = period as Record<string, unknown>
 
   // Clear existing lines
-  await db.prepare('DELETE FROM payroll_period_lines WHERE period_id = ?').bind(periodId).run()
+  await sb.from('payroll_period_lines').delete().eq('period_id', periodId)
 
-  // Aggregate from payroll_daily + attendance_records + workers
-  await db.prepare(`
-    INSERT INTO payroll_period_lines (period_id, worker_id, full_name, bank_code, bank_account,
-      shifts, total_gross_thb, total_ot_thb, total_late_thb, total_damage_thb, net_pay_thb)
-    SELECT
-      ? as period_id,
-      w.id as worker_id,
-      a.full_name,
-      w.bank_code,
-      w.bank_account,
-      COUNT(a.id) as shifts,
-      SUM(pd.gross_wage_thb) as total_gross_thb,
-      SUM(pd.ot_pay_thb) as total_ot_thb,
-      SUM(pd.late_deduction_thb) as total_late_thb,
-      SUM(pd.damage_thb) as total_damage_thb,
-      SUM(pd.gross_wage_thb) as net_pay_thb
-    FROM attendance_records a
-    JOIN payroll_daily pd ON pd.attendance_id = a.id
-    LEFT JOIN workers w ON w.name_local = a.full_name AND w.country_code = a.country_code
-    WHERE a.country_code = ? AND a.work_date BETWEEN ? AND ? AND a.deleted_at IS NULL
-    GROUP BY a.full_name
-  `).bind(periodId, country, period.from_date, period.to_date).run()
+  // Fetch all attendance records in range with payroll data
+  const { data: records } = await sb.from('attendance_records')
+    .select('id, full_name, payroll_daily(gross_wage_thb, ot_pay_thb, late_deduction_thb, damage_thb)')
+    .eq('country_code', country)
+    .gte('work_date', p['from_date'] as string)
+    .lte('work_date', p['to_date'] as string)
+    .is('deleted_at', null)
+
+  if (!records?.length) return
+
+  // Aggregate by full_name
+  const byName: Record<string, {
+    full_name: string
+    shifts: number
+    total_gross_thb: number
+    total_ot_thb: number
+    total_late_thb: number
+    total_damage_thb: number
+    net_pay_thb: number
+    worker_id?: string
+    bank_code?: string
+    bank_account?: string
+  }> = {}
+
+  for (const rec of records) {
+    const r = rec as Record<string, unknown>
+    const pd = r['payroll_daily'] as Record<string, unknown> | null
+    if (!pd) continue
+
+    const name = r['full_name'] as string
+    if (!byName[name]) {
+      byName[name] = { full_name: name, shifts: 0, total_gross_thb: 0, total_ot_thb: 0, total_late_thb: 0, total_damage_thb: 0, net_pay_thb: 0 }
+    }
+    const acc = byName[name]
+    acc.shifts++
+    acc.total_gross_thb += Number(pd['gross_wage_thb']) || 0
+    acc.total_ot_thb += Number(pd['ot_pay_thb']) || 0
+    acc.total_late_thb += Number(pd['late_deduction_thb']) || 0
+    acc.total_damage_thb += Number(pd['damage_thb']) || 0
+    acc.net_pay_thb += Number(pd['gross_wage_thb']) || 0
+  }
+
+  // Look up worker bank details
+  const names = Object.keys(byName)
+  if (names.length) {
+    const { data: workers } = await sb.from('workers')
+      .select('name_local, id, bank_code, bank_account')
+      .eq('country_code', country)
+      .in('name_local', names)
+
+    for (const w of workers ?? []) {
+      const ww = w as Record<string, unknown>
+      const acc = byName[ww['name_local'] as string]
+      if (acc) {
+        acc.worker_id = ww['id'] as string
+        acc.bank_code = ww['bank_code'] as string | undefined
+        acc.bank_account = ww['bank_account'] as string | undefined
+      }
+    }
+  }
+
+  const lines = Object.values(byName).map(acc => ({
+    period_id: periodId,
+    worker_id: acc.worker_id ?? null,
+    full_name: acc.full_name,
+    bank_code: acc.bank_code ?? null,
+    bank_account: acc.bank_account ?? null,
+    shifts: acc.shifts,
+    total_gross_thb: acc.total_gross_thb,
+    total_ot_thb: acc.total_ot_thb,
+    total_late_thb: acc.total_late_thb,
+    total_damage_thb: acc.total_damage_thb,
+    net_pay_thb: acc.net_pay_thb,
+  }))
+
+  if (lines.length) {
+    await sb.from('payroll_period_lines').insert(lines)
+  }
 }
-
-declare const D1Database: never
-type D1Database = typeof globalThis extends { DB: infer T } ? T : Record<string, unknown>
 
 export { periodsRouter }

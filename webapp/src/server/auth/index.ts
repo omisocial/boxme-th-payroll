@@ -1,6 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import type { D1Database } from '../db/queries'
-import { getUserByEmail, getUserById, getSessionById, deleteSession } from '../db/queries'
+import type { SB } from '../db/supabase'
 
 const SESSION_TTL_HOURS = 24
 
@@ -8,19 +7,14 @@ function sha256(s: string) {
   return createHash('sha256').update(s).digest('hex')
 }
 
-// Verify password against stored hash.
-// Supports $seed$sha256$ prefix (first-login seed) and future $argon2$ prefix.
 export async function verifyPassword(stored: string, candidate: string): Promise<boolean> {
   if (stored.startsWith('$seed$sha256$')) {
     const hash = stored.replace('$seed$sha256$', '')
     return sha256(candidate) === hash
   }
-  // TODO: Argon2 WASM verification for upgraded hashes
   return false
 }
 
-// Hash a new password (for change-password flow) — simple SHA-256 for now,
-// upgrade to Argon2 WASM when available on Workers runtime.
 export async function hashPassword(password: string): Promise<string> {
   return `$seed$sha256$${sha256(password)}`
 }
@@ -30,22 +24,20 @@ function newSessionToken() {
 }
 
 export async function createSession(
-  db: D1Database,
+  sb: SB,
   userId: string,
   ip?: string,
   userAgent?: string
 ): Promise<string> {
   const token = newSessionToken()
-  const expiresAt = new Date(Date.now() + SESSION_TTL_HOURS * 3600 * 1000)
-    .toISOString()
-    .replace('T', ' ')
-    .split('.')[0]
-
-  await db.prepare(`
-    INSERT INTO sessions (id, user_id, expires_at, ip, user_agent)
-    VALUES (?, ?, ?, ?, ?)
-  `).bind(token, userId, expiresAt, ip ?? null, userAgent ?? null).run()
-
+  const expiresAt = new Date(Date.now() + SESSION_TTL_HOURS * 3600 * 1000).toISOString()
+  await sb.from('sessions').insert({
+    id: token,
+    user_id: userId,
+    expires_at: expiresAt,
+    ip: ip ?? null,
+    user_agent: userAgent ?? null,
+  })
   return token
 }
 
@@ -59,64 +51,90 @@ export interface AuthUser {
 }
 
 export async function resolveSession(
-  db: D1Database,
+  sb: SB,
   token: string | undefined
 ): Promise<AuthUser | null> {
   if (!token) return null
-  const row = await getSessionById(db, token)
-  if (!row || !row['active']) return null
+
+  const { data: session } = await sb.from('sessions')
+    .select('user_id')
+    .eq('id', token)
+    .gt('expires_at', new Date().toISOString())
+    .maybeSingle()
+
+  if (!session) return null
+  const s = session as Record<string, unknown>
+
+  const { data: user } = await sb.from('users')
+    .select('id, email, role, country_scope, warehouse_id, force_password_change, active')
+    .eq('id', s['user_id'])
+    .eq('active', true)
+    .maybeSingle()
+
+  if (!user) return null
+  const u = user as Record<string, unknown>
   return {
-    id: row['user_id'] as string,
-    email: row['email'] as string,
-    role: row['role'] as string,
-    country_scope: row['country_scope'] as string,
-    warehouse_id: row['warehouse_id'] as string | null,
-    force_password_change: Boolean(row['force_password_change']),
+    id: u['id'] as string,
+    email: u['email'] as string,
+    role: u['role'] as string,
+    country_scope: u['country_scope'] as string,
+    warehouse_id: u['warehouse_id'] as string | null,
+    force_password_change: Boolean(u['force_password_change']),
   }
 }
 
 export async function loginUser(
-  db: D1Database,
+  sb: SB,
   email: string,
   password: string,
   ip?: string,
   userAgent?: string
 ): Promise<{ token: string; user: AuthUser } | null> {
-  const row = await getUserByEmail(db, email)
-  if (!row) return null
+  const { data: row } = await sb.from('users')
+    .select('*')
+    .eq('email', email)
+    .eq('active', true)
+    .maybeSingle()
 
-  const valid = await verifyPassword(row['password_hash'] as string, password)
+  if (!row) return null
+  const r = row as Record<string, unknown>
+
+  const valid = await verifyPassword(r['password_hash'] as string, password)
   if (!valid) return null
 
-  await db.prepare(`UPDATE users SET last_login_at = datetime('now') WHERE id = ?`)
-    .bind(row['id']).run()
+  await sb.from('users')
+    .update({ last_login_at: new Date().toISOString() })
+    .eq('id', r['id'])
 
-  const token = await createSession(db, row['id'] as string, ip, userAgent)
+  const token = await createSession(sb, r['id'] as string, ip, userAgent)
   return {
     token,
     user: {
-      id: row['id'] as string,
-      email: row['email'] as string,
-      role: row['role'] as string,
-      country_scope: row['country_scope'] as string,
-      warehouse_id: row['warehouse_id'] as string | null,
-      force_password_change: Boolean(row['force_password_change']),
+      id: r['id'] as string,
+      email: r['email'] as string,
+      role: r['role'] as string,
+      country_scope: r['country_scope'] as string,
+      warehouse_id: r['warehouse_id'] as string | null,
+      force_password_change: Boolean(r['force_password_change']),
     },
   }
 }
 
-export async function logoutUser(db: D1Database, token: string): Promise<void> {
-  await deleteSession(db, token)
+export async function logoutUser(sb: SB, token: string): Promise<void> {
+  await sb.from('sessions').delete().eq('id', token)
 }
 
 export async function changePassword(
-  db: D1Database,
+  sb: SB,
   userId: string,
   newPassword: string
 ): Promise<void> {
   const hash = await hashPassword(newPassword)
-  await db.prepare(`
-    UPDATE users SET password_hash = ?, force_password_change = 0, updated_at = datetime('now')
-    WHERE id = ?
-  `).bind(hash, userId).run()
+  await sb.from('users')
+    .update({
+      password_hash: hash,
+      force_password_change: false,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', userId)
 }

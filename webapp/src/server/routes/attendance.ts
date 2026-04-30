@@ -4,11 +4,12 @@ import { z } from 'zod'
 import { guard, type Env } from '../auth/rbac'
 import { computePayroll, DEFAULT_CONFIG } from '../engines/compute'
 import { resolveRateConfig, appendAuditLog } from '../db/queries'
+import { getSupabase, storageUpload, type SB } from '../db/supabase'
 
 const attendanceRouter = new Hono<{ Bindings: Env }>()
 
 const manualEntrySchema = z.object({
-  warehouseId: z.string(),
+  warehouseId: z.string().uuid(),
   workDate: z.string(),
   fullName: z.string(),
   nickname: z.string().optional(),
@@ -26,102 +27,118 @@ const manualEntrySchema = z.object({
 
 // GET /api/attendance
 attendanceRouter.get('/', ...guard('viewer'), async (c) => {
+  const sb = getSupabase(c.env)
   const user = c.get('user')
   const country = user.country_scope === '*' ? (c.req.query('country') ?? 'TH') : user.country_scope
   const date = c.req.query('date')
-  const dept = c.req.query('dept')
-  const status = c.req.query('status')
   const from = c.req.query('from')
   const to = c.req.query('to')
+  const status = c.req.query('status')
   const page = parseInt(c.req.query('page') ?? '1')
   const limit = Math.min(parseInt(c.req.query('limit') ?? '100'), 500)
   const offset = (page - 1) * limit
 
-  let query = `SELECT a.*, p.gross_wage_thb, p.flags_json FROM attendance_records a
-    LEFT JOIN payroll_daily p ON p.attendance_id = a.id
-    WHERE a.country_code = ? AND a.deleted_at IS NULL`
-  const params: unknown[] = [country]
+  let query = sb.from('attendance_records')
+    .select('*, payroll_daily(gross_wage_thb, flags_json)', { count: 'exact' })
+    .eq('country_code', country)
+    .is('deleted_at', null)
 
-  if (date) { query += ` AND a.work_date = ?`; params.push(date) }
-  if (from && to) { query += ` AND a.work_date BETWEEN ? AND ?`; params.push(from, to) }
-  if (dept) { query += ` AND a.note LIKE ?`; params.push(`${dept}%`) }
-  if (status) { query += ` AND a.status = ?`; params.push(status) }
+  if (date) query = query.eq('work_date', date)
+  if (from && to) query = query.gte('work_date', from).lte('work_date', to)
+  if (status) query = query.eq('status', status)
 
-  const countQuery = `SELECT COUNT(*) as cnt FROM attendance_records a WHERE a.country_code = ? AND a.deleted_at IS NULL` +
-    (date ? ` AND a.work_date = ?` : '') +
-    (from && to ? ` AND a.work_date BETWEEN ? AND ?` : '') +
-    (dept ? ` AND a.note LIKE ?` : '') +
-    (status ? ` AND a.status = ?` : '')
+  const { data, count, error } = await query
+    .order('work_date', { ascending: false })
+    .order('full_name', { ascending: true })
+    .range(offset, offset + limit - 1)
 
-  const countParams = [country, ...(params.slice(1))]
-  const totalRow = await c.env.DB.prepare(countQuery).bind(...countParams).first<{ cnt: number }>()
-
-  query += ` ORDER BY a.work_date DESC, a.full_name LIMIT ? OFFSET ?`
-  params.push(limit, offset)
-
-  const { results } = await c.env.DB.prepare(query).bind(...params).all<Record<string, unknown>>()
+  if (error) return c.json({ success: false, message: error.message }, 500)
 
   return c.json({
     success: true,
-    data: results ?? [],
-    meta: { total: totalRow?.cnt ?? 0, page, limit },
+    data: data ?? [],
+    meta: { total: count ?? 0, page, limit },
   })
 })
 
 // POST /api/attendance — manual entry
 attendanceRouter.post('/', ...guard('supervisor'), zValidator('json', manualEntrySchema), async (c) => {
+  const sb = getSupabase(c.env)
   const user = c.get('user')
   const country = user.country_scope === '*' ? (c.req.query('country') ?? 'TH') : user.country_scope
   const body = c.req.valid('json')
-  const id = crypto.randomUUID()
 
-  await c.env.DB.prepare(`
-    INSERT INTO attendance_records (id, country_code, warehouse_id, work_date, full_name,
-      nickname, checkin, checkout, note, shift_code, manual_note, job_type_code,
-      ot_before_hours, ot_after_hours, damage_deduction, other_deduction, created_by)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-  `).bind(
-    id, country, body.warehouseId, body.workDate, body.fullName,
-    body.nickname ?? null, body.checkin ?? null, body.checkout ?? null,
-    body.note ?? null, body.shiftCode ?? null, body.manualNote ?? null, body.jobTypeCode,
-    body.otBeforeHours, body.otAfterHours, body.damageDeduction, body.otherDeduction,
-    user.email
-  ).run()
+  const { data: created, error } = await sb.from('attendance_records')
+    .insert({
+      country_code: country,
+      warehouse_id: body.warehouseId,
+      work_date: body.workDate,
+      full_name: body.fullName,
+      nickname: body.nickname ?? null,
+      checkin: body.checkin ?? null,
+      checkout: body.checkout ?? null,
+      note: body.note ?? null,
+      shift_code: body.shiftCode ?? null,
+      manual_note: body.manualNote ?? null,
+      job_type_code: body.jobTypeCode,
+      ot_before_hours: body.otBeforeHours,
+      ot_after_hours: body.otAfterHours,
+      damage_deduction: body.damageDeduction,
+      other_deduction: body.otherDeduction,
+      created_by: user.email,
+    })
+    .select()
+    .single()
 
-  // Auto-compute payroll for this row
-  await computeAndSave(c.env.DB, id, country, body.workDate, body.note ?? null)
+  if (error) return c.json({ success: false, message: error.message }, 500)
 
-  await appendAuditLog(c.env.DB, {
+  const row = created as Record<string, unknown>
+  await computeAndSave(sb, row['id'] as string, country, row['work_date'] as string, row['note'] as string | null)
+
+  await appendAuditLog(sb, {
     user_id: user.id, user_email: user.email,
-    action: 'create', entity: 'attendance', entity_id: id, country_code: country,
+    action: 'create', entity: 'attendance',
+    entity_id: row['id'] as string,
+    country_code: country,
     after: body,
   })
 
-  const created = await c.env.DB.prepare('SELECT * FROM attendance_records WHERE id = ?').bind(id).first()
   return c.json({ success: true, data: created }, 201)
 })
 
 // POST /api/attendance/:id/compute — recompute a single row
 attendanceRouter.post('/:id/compute', ...guard('hr'), async (c) => {
+  const sb = getSupabase(c.env)
   const user = c.get('user')
   const country = user.country_scope === '*' ? (c.req.query('country') ?? 'TH') : user.country_scope
   const id = c.req.param('id')
 
-  const att = await c.env.DB.prepare(
-    'SELECT * FROM attendance_records WHERE id = ? AND country_code = ?'
-  ).bind(id, country).first<Record<string, unknown>>()
-  if (!att) return c.json({ success: false, message: 'Not found' }, 404)
+  const { data: att } = await sb.from('attendance_records')
+    .select('*')
+    .eq('id', id)
+    .eq('country_code', country)
+    .maybeSingle()
 
-  await computeAndSave(c.env.DB, id, country, att['work_date'] as string, att['note'] as string | null)
-  const result = await c.env.DB.prepare('SELECT * FROM payroll_daily WHERE attendance_id = ?').bind(id).first()
+  if (!att) return c.json({ success: false, message: 'Not found' }, 404)
+  const a = att as Record<string, unknown>
+
+  await computeAndSave(sb, id, country, a['work_date'] as string, a['note'] as string | null)
+
+  const { data: result } = await sb.from('payroll_daily')
+    .select('*')
+    .eq('attendance_id', id)
+    .maybeSingle()
+
   return c.json({ success: true, data: result })
 })
 
 // POST /api/attendance/import — multipart Excel upload, returns preview
 attendanceRouter.post('/import', ...guard('hr'), async (c) => {
+  const sb = getSupabase(c.env)
   const user = c.get('user')
   const country = user.country_scope === '*' ? (c.req.query('country') ?? 'TH') : user.country_scope
-  const warehouseId = c.req.query('warehouse') ?? 'wh-th-bkk-1'
+  const warehouseId = c.req.query('warehouse')
+  if (!warehouseId) return c.json({ success: false, message: 'warehouse query param required (UUID)' }, 400)
 
   const formData = await c.req.formData()
   const file = formData.get('file') as File | null
@@ -130,12 +147,15 @@ attendanceRouter.post('/import', ...guard('hr'), async (c) => {
   const bytes = await file.arrayBuffer()
   const sessionId = crypto.randomUUID()
 
-  // Upload raw file to R2 for later commit
-  await c.env.FILES.put(`imports/${sessionId}/${file.name}`, bytes, {
-    httpMetadata: { contentType: file.type },
-  })
+  // Upload raw file to Supabase Storage for audit trail
+  try {
+    await storageUpload(sb, 'payroll-imports', `${country}/${sessionId}/${file.name}`, bytes, file.type || 'application/octet-stream')
+  } catch {
+    // Non-fatal — continue even if storage bucket not configured
+    console.warn('[import] Storage upload failed (bucket may not exist yet)')
+  }
 
-  // Parse Excel using dynamic import of xlsx (available in Workers via npm)
+  // Parse Excel
   const { read, utils } = await import('xlsx')
   const wb = read(new Uint8Array(bytes), { type: 'array' })
 
@@ -145,16 +165,16 @@ attendanceRouter.post('/import', ...guard('hr'), async (c) => {
   for (const sheetName of wb.SheetNames) {
     if (!sheetName.includes('วันที่') && !sheetName.match(/day\s*\d+/i)) continue
     const ws = wb.Sheets[sheetName]
-    const rows = utils.sheet_to_json<Record<string, unknown>>(ws, { header: 1, raw: false })
+    const rows = utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: false })
 
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i] as unknown[]
-      if (!row || !row[1]) continue // skip empty rows
+      if (!row || !row[1]) continue
 
       previewRows.push({
         rowIndex: i,
         sheet: sheetName,
-        workDate: '', // TODO: derive from sheet name
+        workDate: '',
         fullName: String(row[1] ?? '').trim(),
         checkin: row[3] ? String(row[3]).trim() : undefined,
         checkout: row[4] ? String(row[4]).trim() : undefined,
@@ -164,24 +184,24 @@ attendanceRouter.post('/import', ...guard('hr'), async (c) => {
     }
   }
 
-  // Record import session in DB
-  await c.env.DB.prepare(`
-    INSERT INTO import_sessions (id, country_code, warehouse_id, filename, row_count, created_by)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).bind(sessionId, country, warehouseId, file.name, previewRows.length, user.email).run()
+  // Store import session with preview rows in DB
+  const { error } = await sb.from('import_sessions').insert({
+    id: sessionId,
+    country_code: country,
+    warehouse_id: warehouseId,
+    filename: file.name,
+    row_count: previewRows.length,
+    preview_json: previewRows,
+    created_by: user.email,
+  })
 
-  // Cache preview in KV (15 min TTL)
-  await c.env.SESSION_KV.put(
-    `import:${sessionId}`,
-    JSON.stringify({ rows: previewRows, country, warehouseId }),
-    { expirationTtl: 900 }
-  )
+  if (error) return c.json({ success: false, message: error.message }, 500)
 
   return c.json({
     success: true,
     data: {
       importSessionId: sessionId,
-      rows: previewRows.slice(0, 100), // preview max 100
+      rows: previewRows.slice(0, 100),
       warnings,
       totalRows: previewRows.length,
     },
@@ -190,57 +210,59 @@ attendanceRouter.post('/import', ...guard('hr'), async (c) => {
 
 // POST /api/attendance/import/commit
 attendanceRouter.post('/import/commit', ...guard('hr'), async (c) => {
+  const sb = getSupabase(c.env)
   const user = c.get('user')
   const country = user.country_scope === '*' ? (c.req.query('country') ?? 'TH') : user.country_scope
   const { importSessionId } = await c.req.json<{ importSessionId: string }>()
 
-  const cached = await c.env.SESSION_KV.get(`import:${importSessionId}`)
-  if (!cached) return c.json({ success: false, message: 'Import session expired or not found' }, 404)
+  const { data: session } = await sb.from('import_sessions')
+    .select('*')
+    .eq('id', importSessionId)
+    .eq('status', 'preview')
+    .maybeSingle()
 
-  const { rows, warehouseId } = JSON.parse(cached) as {
-    rows: Array<Record<string, unknown>>
-    country: string
-    warehouseId: string
-  }
+  if (!session) return c.json({ success: false, message: 'Import session not found or already committed' }, 404)
+
+  const s = session as Record<string, unknown>
+  const rows = (s['preview_json'] as Array<Record<string, unknown>>) ?? []
+  const warehouseId = s['warehouse_id'] as string
 
   let imported = 0, skipped = 0
   const errors: string[] = []
-  const BATCH = 500
+  const BATCH = 200
 
   for (let i = 0; i < rows.length; i += BATCH) {
     const chunk = rows.slice(i, i + BATCH)
-    const stmts = chunk.map(row => {
-      const id = crypto.randomUUID()
-      return c.env.DB.prepare(`
-        INSERT INTO attendance_records (id, country_code, warehouse_id, work_date, full_name,
-          checkin, checkout, note, shift_code, import_batch_id, created_by)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)
-      `).bind(
-        id, country, warehouseId,
-        String(row['workDate'] ?? ''), String(row['fullName'] ?? ''),
-        row['checkin'] ?? null, row['checkout'] ?? null,
-        row['note'] ?? null, row['shiftCode'] ?? null,
-        importSessionId, user.email
-      )
-    })
-    try {
-      await c.env.DB.batch(stmts)
-      imported += chunk.length
-    } catch (e) {
-      errors.push(String(e))
+    const records = chunk.map(row => ({
+      country_code: country,
+      warehouse_id: warehouseId,
+      work_date: String(row['workDate'] ?? ''),
+      full_name: String(row['fullName'] ?? ''),
+      checkin: row['checkin'] ?? null,
+      checkout: row['checkout'] ?? null,
+      note: row['note'] ?? null,
+      shift_code: row['shiftCode'] ?? null,
+      import_batch_id: importSessionId,
+      created_by: user.email,
+    }))
+
+    const { error } = await sb.from('attendance_records').insert(records)
+    if (error) {
+      errors.push(error.message)
       skipped += chunk.length
+    } else {
+      imported += chunk.length
     }
   }
 
-  // Mark session committed
-  await c.env.DB.prepare(
-    `UPDATE import_sessions SET status = 'committed', committed_at = datetime('now') WHERE id = ?`
-  ).bind(importSessionId).run()
-  await c.env.SESSION_KV.delete(`import:${importSessionId}`)
+  await sb.from('import_sessions')
+    .update({ status: 'committed', committed_at: new Date().toISOString() })
+    .eq('id', importSessionId)
 
-  await appendAuditLog(c.env.DB, {
+  await appendAuditLog(sb, {
     user_id: user.id, user_email: user.email,
-    action: 'import_commit', entity: 'attendance', entity_id: importSessionId,
+    action: 'import_commit', entity: 'attendance',
+    entity_id: importSessionId,
     country_code: country,
     after: { imported, skipped },
   })
@@ -250,72 +272,70 @@ attendanceRouter.post('/import/commit', ...guard('hr'), async (c) => {
 
 // Helper: compute and upsert payroll_daily for one attendance row
 async function computeAndSave(
-  db: D1Database,
+  sb: SB,
   attendanceId: string,
   country: string,
   workDate: string,
   note: string | null
 ) {
-  const att = await db.prepare('SELECT * FROM attendance_records WHERE id = ?')
-    .bind(attendanceId).first<Record<string, unknown>>()
-  if (!att) return
+  const { data: att } = await sb.from('attendance_records')
+    .select('*')
+    .eq('id', attendanceId)
+    .maybeSingle()
 
-  const rateConfig = await resolveRateConfig(db, country, note, workDate)
+  if (!att) return
+  const a = att as Record<string, unknown>
+
+  const rateConfig = await resolveRateConfig(sb, country, note, workDate)
   const config = {
-    defaultDailyRate: rateConfig?.base_daily ?? 500,
-    otMultiplier: rateConfig?.ot_multiplier ?? 1.5,
-    lateBufferMinutes: 0,
-    lateRoundingUnit: 0,
-    paidLeaveClassifications: [],
+    ...DEFAULT_CONFIG,
+    defaultDailyRate: rateConfig?.base_daily ?? DEFAULT_CONFIG.defaultDailyRate,
+    otMultiplier: rateConfig?.ot_multiplier ?? DEFAULT_CONFIG.otMultiplier,
   }
 
   const row = {
-    sheet: String(att['import_batch_id'] ?? 'db'),
+    sheet: String(a['import_batch_id'] ?? 'db'),
     rowIndex: 0,
-    workDate: att['work_date'] as string,
-    fullName: att['full_name'] as string,
-    checkin: att['checkin'] as string | undefined,
-    checkout: att['checkout'] as string | undefined,
-    note: att['note'] as string | undefined,
-    shiftCode: att['shift_code'] as string | undefined,
-    manualNote: att['manual_note'] as string | undefined,
-    otBeforeHours: (att['ot_before_hours'] as number) || 0,
-    otAfterHours: (att['ot_after_hours'] as number) || 0,
-    damageDeduction: (att['damage_deduction'] as number) || 0,
-    otherDeduction: (att['other_deduction'] as number) || 0,
+    workDate: a['work_date'] as string,
+    fullName: a['full_name'] as string,
+    checkin: a['checkin'] as string | undefined,
+    checkout: a['checkout'] as string | undefined,
+    note: a['note'] as string | undefined,
+    shiftCode: a['shift_code'] as string | undefined,
+    manualNote: a['manual_note'] as string | undefined,
+    otBeforeHours: Number(a['ot_before_hours']) || 0,
+    otAfterHours: Number(a['ot_after_hours']) || 0,
+    damageDeduction: Number(a['damage_deduction']) || 0,
+    otherDeduction: Number(a['other_deduction']) || 0,
   }
 
   const result = computePayroll(row, config)
 
-  await db.prepare(`
-    INSERT INTO payroll_daily (attendance_id, country_code,
-      dept_category, shift_start, shift_end, crosses_midnight,
-      shift_duration_hours, hours_bucket_u, wage_per_minute,
-      late_minutes_raw, late_minutes_deducted, early_out_minutes,
-      daily_rate_thb, late_deduction_thb, early_out_deduction_thb,
-      ot_total_hours, ot_pay_thb, damage_thb, other_deduction_thb,
-      gross_wage_raw, gross_wage_thb, flags_json)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    ON CONFLICT(attendance_id) DO UPDATE SET
-      gross_wage_thb=excluded.gross_wage_thb,
-      flags_json=excluded.flags_json,
-      computed_at=datetime('now')
-  `).bind(
-    attendanceId, country,
-    result.deptCategory, result.shiftStart ?? null, result.shiftEnd ?? null,
-    result.crossesMidnight ? 1 : 0,
-    result.shiftDurationHours, result.hoursBucketU, result.wagePerMinute,
-    result.lateMinutesRaw, result.lateMinutesDeducted, result.earlyOutMinutes,
-    result.dailyRateThb, result.lateDeductionThb, result.earlyOutDeductionThb,
-    result.otTotalHours, result.otPayThb, result.damageThb, result.otherDeductionThb,
-    result.grossWageRaw, result.grossWageThb, JSON.stringify(result.flags)
-  ).run()
-}
-
-declare const D1Database: never
-type D1Database = typeof globalThis extends { DB: infer T } ? T : {
-  prepare(sql: string): { bind(...args: unknown[]): { first<T>(): Promise<T | null>; run(): Promise<unknown>; all<T>(): Promise<{ results?: T[] }> }; first<T>(): Promise<T | null> }
-  batch(stmts: unknown[]): Promise<unknown[]>
+  await sb.from('payroll_daily').upsert({
+    attendance_id: attendanceId,
+    country_code: country,
+    dept_category: result.deptCategory,
+    shift_start: result.shiftStart ?? null,
+    shift_end: result.shiftEnd ?? null,
+    crosses_midnight: result.crossesMidnight,
+    shift_duration_hours: result.shiftDurationHours,
+    hours_bucket_u: result.hoursBucketU,
+    wage_per_minute: result.wagePerMinute,
+    late_minutes_raw: result.lateMinutesRaw,
+    late_minutes_deducted: result.lateMinutesDeducted,
+    early_out_minutes: result.earlyOutMinutes,
+    daily_rate_thb: result.dailyRateThb,
+    late_deduction_thb: result.lateDeductionThb,
+    early_out_deduction_thb: result.earlyOutDeductionThb,
+    ot_total_hours: result.otTotalHours,
+    ot_pay_thb: result.otPayThb,
+    damage_thb: result.damageThb,
+    other_deduction_thb: result.otherDeductionThb,
+    gross_wage_raw: result.grossWageRaw,
+    gross_wage_thb: result.grossWageThb,
+    flags_json: result.flags,
+    computed_at: new Date().toISOString(),
+  }, { onConflict: 'attendance_id' })
 }
 
 export { attendanceRouter }

@@ -1,10 +1,14 @@
 import type { Context, Next } from 'hono'
 import { resolveSession, type AuthUser } from './index'
+import { getSupabase } from '../db/supabase'
 
 export type Env = {
-  DB: D1Database
-  FILES: R2Bucket
-  SESSION_KV: KVNamespace
+  SUPABASE_URL: string
+  SUPABASE_SERVICE_ROLE_KEY: string
+  DEFAULT_COUNTRY: string
+  APP_URL: string
+  RESEND_API_KEY?: string
+  CRON_SECRET?: string
 }
 
 type Variables = {
@@ -27,11 +31,11 @@ export function getSessionToken(c: HonoCtx): string | undefined {
   return match?.[1]
 }
 
-// Require authenticated session — attach user to context
 export function requireAuth() {
   return async (c: HonoCtx, next: Next) => {
     const token = getSessionToken(c)
-    const user = await resolveSession(c.env.DB, token)
+    const sb = getSupabase(c.env)
+    const user = await resolveSession(sb, token)
     if (!user) {
       return c.json({ success: false, message: 'Unauthorized' }, 401)
     }
@@ -40,7 +44,6 @@ export function requireAuth() {
   }
 }
 
-// Require one of the given roles (or higher)
 export function requireRole(...roles: string[]) {
   return async (c: HonoCtx, next: Next) => {
     const user = c.get('user')
@@ -53,12 +56,11 @@ export function requireRole(...roles: string[]) {
   }
 }
 
-// Require user's country_scope matches the requested country
 export function requireCountry(countryParam = 'country') {
   return async (c: HonoCtx, next: Next) => {
     const user = c.get('user')
     if (!user) return c.json({ success: false, message: 'Unauthorized' }, 401)
-    if (user.country_scope === '*') return next() // super_admin / global viewer
+    if (user.country_scope === '*') return next()
 
     const requested =
       c.req.query('country') ??
@@ -73,12 +75,10 @@ export function requireCountry(countryParam = 'country') {
   }
 }
 
-// Combined: auth + country check (most common guard)
 export function guard(minRole = 'viewer', countryParam = 'country') {
   return [requireAuth(), requireRole(minRole), requireCountry(countryParam)]
 }
 
-// Cookie helpers
 export function setSessionCookie(c: HonoCtx, token: string) {
   c.header(
     'Set-Cookie',
@@ -88,38 +88,4 @@ export function setSessionCookie(c: HonoCtx, token: string) {
 
 export function clearSessionCookie(c: HonoCtx) {
   c.header('Set-Cookie', 'session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0')
-}
-
-// Declare CF globals for TypeScript
-declare global {
-  interface D1Database {
-    prepare(query: string): D1PreparedStatement
-    exec(query: string): Promise<unknown>
-    batch(statements: D1PreparedStatement[]): Promise<unknown[]>
-  }
-  interface D1PreparedStatement {
-    bind(...values: unknown[]): D1PreparedStatement
-    first<T = unknown>(colName?: string): Promise<T | null>
-    run(): Promise<unknown>
-    all<T = unknown>(): Promise<{ results?: T[] }>
-    raw<T = unknown[]>(): Promise<T[]>
-  }
-  interface R2Bucket {
-    put(key: string, value: ArrayBuffer | ReadableStream | string, options?: unknown): Promise<unknown>
-    get(key: string): Promise<R2Object | null>
-    delete(key: string): Promise<void>
-    list(options?: unknown): Promise<{ objects: R2Object[] }>
-  }
-  interface R2Object {
-    key: string
-    size: number
-    body: ReadableStream
-    arrayBuffer(): Promise<ArrayBuffer>
-    text(): Promise<string>
-  }
-  interface KVNamespace {
-    get(key: string): Promise<string | null>
-    put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>
-    delete(key: string): Promise<void>
-  }
 }

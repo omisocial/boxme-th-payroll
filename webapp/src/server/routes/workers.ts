@@ -3,17 +3,18 @@ import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
 import { guard, type Env } from '../auth/rbac'
 import { appendAuditLog } from '../db/queries'
+import { getSupabase } from '../db/supabase'
 
 const workersRouter = new Hono<{ Bindings: Env }>()
 
 const workerCreateSchema = z.object({
-  warehouseId: z.string(),
+  warehouseId: z.string().uuid(),
   code: z.string().min(1),
   nameLocal: z.string().min(1),
   nameEn: z.string().optional(),
   departmentCode: z.string().optional(),
   shiftCode: z.string().optional(),
-  gradeId: z.string().optional(),
+  gradeId: z.string().uuid().optional(),
   jobTypeCode: z.string().default('GENERAL'),
   bankCode: z.string().optional(),
   bankAccount: z.string().optional(),
@@ -24,8 +25,9 @@ const workerCreateSchema = z.object({
 
 // GET /api/workers
 workersRouter.get('/', ...guard('viewer'), async (c) => {
+  const sb = getSupabase(c.env)
   const user = c.get('user')
-  const country = c.req.query('country') ?? user.country_scope === '*' ? (c.req.query('country') ?? 'TH') : user.country_scope
+  const country = user.country_scope === '*' ? (c.req.query('country') ?? 'TH') : user.country_scope
   const dept = c.req.query('dept')
   const status = c.req.query('status') ?? 'active'
   const q = c.req.query('q')
@@ -33,23 +35,22 @@ workersRouter.get('/', ...guard('viewer'), async (c) => {
   const limit = Math.min(parseInt(c.req.query('limit') ?? '50'), 200)
   const offset = (page - 1) * limit
 
-  let query = `SELECT * FROM workers WHERE country_code = ? AND deleted_at IS NULL`
-  const params: unknown[] = [country]
+  let query = sb.from('workers')
+    .select('*', { count: 'exact' })
+    .eq('country_code', country)
+    .is('deleted_at', null)
 
-  if (status !== 'all') { query += ` AND status = ?`; params.push(status) }
-  if (dept) { query += ` AND department_code = ?`; params.push(dept) }
-  if (q) { query += ` AND (name_local LIKE ? OR name_en LIKE ? OR code LIKE ?)`; params.push(`%${q}%`, `%${q}%`, `%${q}%`) }
+  if (status !== 'all') query = query.eq('status', status)
+  if (dept) query = query.eq('department_code', dept)
+  if (q) query = query.or(`name_local.ilike.%${q}%,name_en.ilike.%${q}%,code.ilike.%${q}%`)
 
-  const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) as cnt')
-  const totalRow = await c.env.DB.prepare(countQuery).bind(...params).first<{ cnt: number }>()
+  const { data, count, error } = await query
+    .order('name_local')
+    .range(offset, offset + limit - 1)
 
-  query += ` ORDER BY name_local LIMIT ? OFFSET ?`
-  params.push(limit, offset)
+  if (error) return c.json({ success: false, message: error.message }, 500)
 
-  const { results } = await c.env.DB.prepare(query).bind(...params).all<Record<string, unknown>>()
-
-  // Mask bank_account for viewer role
-  const masked = (results ?? []).map(w => ({
+  const masked = (data ?? []).map((w: Record<string, unknown>) => ({
     ...w,
     bank_account: user.role === 'viewer' ? maskAccount(w['bank_account'] as string) : w['bank_account'],
   }))
@@ -57,103 +58,131 @@ workersRouter.get('/', ...guard('viewer'), async (c) => {
   return c.json({
     success: true,
     data: masked,
-    meta: { total: totalRow?.cnt ?? 0, page, limit },
+    meta: { total: count ?? 0, page, limit },
   })
 })
 
 // GET /api/workers/:id
 workersRouter.get('/:id', ...guard('viewer'), async (c) => {
+  const sb = getSupabase(c.env)
   const user = c.get('user')
   const country = user.country_scope === '*' ? (c.req.query('country') ?? 'TH') : user.country_scope
-  const row = await c.env.DB.prepare(
-    'SELECT * FROM workers WHERE id = ? AND country_code = ? AND deleted_at IS NULL'
-  ).bind(c.req.param('id'), country).first<Record<string, unknown>>()
 
+  const { data: row, error } = await sb.from('workers')
+    .select('*')
+    .eq('id', c.req.param('id'))
+    .eq('country_code', country)
+    .is('deleted_at', null)
+    .maybeSingle()
+
+  if (error) return c.json({ success: false, message: error.message }, 500)
   if (!row) return c.json({ success: false, message: 'Not found' }, 404)
 
-  if (user.role === 'viewer') row['bank_account'] = maskAccount(row['bank_account'] as string)
-  return c.json({ success: true, data: row })
+  const w = row as Record<string, unknown>
+  if (user.role === 'viewer') w['bank_account'] = maskAccount(w['bank_account'] as string)
+  return c.json({ success: true, data: w })
 })
 
 // POST /api/workers
 workersRouter.post('/', ...guard('hr'), zValidator('json', workerCreateSchema), async (c) => {
+  const sb = getSupabase(c.env)
   const user = c.get('user')
   const country = user.country_scope === '*' ? (c.req.query('country') ?? 'TH') : user.country_scope
   const body = c.req.valid('json')
 
-  const id = crypto.randomUUID()
-  await c.env.DB.prepare(`
-    INSERT INTO workers (id, country_code, warehouse_id, code, name_local, name_en,
-      department_code, shift_code, grade_id, job_type_code,
-      bank_code, bank_account, phone, start_date, notes)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-  `).bind(
-    id, country, body.warehouseId, body.code, body.nameLocal, body.nameEn ?? null,
-    body.departmentCode ?? null, body.shiftCode ?? null, body.gradeId ?? null, body.jobTypeCode,
-    body.bankCode ?? null, body.bankAccount ?? null, body.phone ?? null,
-    body.startDate ?? null, body.notes ?? null
-  ).run()
+  const { data: created, error } = await sb.from('workers')
+    .insert({
+      country_code: country,
+      warehouse_id: body.warehouseId,
+      code: body.code,
+      name_local: body.nameLocal,
+      name_en: body.nameEn ?? null,
+      department_code: body.departmentCode ?? null,
+      shift_code: body.shiftCode ?? null,
+      grade_id: body.gradeId ?? null,
+      job_type_code: body.jobTypeCode,
+      bank_code: body.bankCode ?? null,
+      bank_account: body.bankAccount ?? null,
+      phone: body.phone ?? null,
+      start_date: body.startDate ?? null,
+      notes: body.notes ?? null,
+    })
+    .select()
+    .single()
 
-  await appendAuditLog(c.env.DB, {
+  if (error) return c.json({ success: false, message: error.message }, 500)
+
+  await appendAuditLog(sb, {
     user_id: user.id, user_email: user.email,
-    action: 'create', entity: 'worker', entity_id: id, country_code: country,
+    action: 'create', entity: 'worker',
+    entity_id: (created as Record<string, unknown>)['id'] as string,
+    country_code: country,
     after: body,
   })
 
-  const created = await c.env.DB.prepare('SELECT * FROM workers WHERE id = ?').bind(id).first()
   return c.json({ success: true, data: created }, 201)
 })
 
 // PATCH /api/workers/:id
 workersRouter.patch('/:id', ...guard('hr'), async (c) => {
+  const sb = getSupabase(c.env)
   const user = c.get('user')
   const country = user.country_scope === '*' ? (c.req.query('country') ?? 'TH') : user.country_scope
   const id = c.req.param('id')
 
-  const before = await c.env.DB.prepare(
-    'SELECT * FROM workers WHERE id = ? AND country_code = ? AND deleted_at IS NULL'
-  ).bind(id, country).first()
+  const { data: before } = await sb.from('workers')
+    .select('*')
+    .eq('id', id)
+    .eq('country_code', country)
+    .is('deleted_at', null)
+    .maybeSingle()
+
   if (!before) return c.json({ success: false, message: 'Not found' }, 404)
 
   const body = await c.req.json<Record<string, unknown>>()
   const allowed = ['name_local','name_en','department_code','shift_code','grade_id',
     'job_type_code','bank_code','bank_account','phone','start_date','end_date','status','notes']
 
-  const sets: string[] = []
-  const vals: unknown[] = []
+  const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() }
   for (const [k, v] of Object.entries(body)) {
-    if (allowed.includes(k)) { sets.push(`${k} = ?`); vals.push(v) }
+    if (allowed.includes(k)) updateData[k] = v
   }
-  if (!sets.length) return c.json({ success: false, message: 'No valid fields' }, 400)
 
-  sets.push("updated_at = datetime('now')")
-  vals.push(id, country)
+  if (Object.keys(updateData).length <= 1) {
+    return c.json({ success: false, message: 'No valid fields' }, 400)
+  }
 
-  await c.env.DB.prepare(
-    `UPDATE workers SET ${sets.join(', ')} WHERE id = ? AND country_code = ?`
-  ).bind(...vals).run()
+  const { data: updated, error } = await sb.from('workers')
+    .update(updateData)
+    .eq('id', id)
+    .eq('country_code', country)
+    .select()
+    .single()
 
-  await appendAuditLog(c.env.DB, {
+  if (error) return c.json({ success: false, message: error.message }, 500)
+
+  await appendAuditLog(sb, {
     user_id: user.id, user_email: user.email,
     action: 'update', entity: 'worker', entity_id: id, country_code: country,
     before, after: body,
   })
 
-  const updated = await c.env.DB.prepare('SELECT * FROM workers WHERE id = ?').bind(id).first()
   return c.json({ success: true, data: updated })
 })
 
 // DELETE /api/workers/:id — soft delete
 workersRouter.delete('/:id', ...guard('hr'), async (c) => {
+  const sb = getSupabase(c.env)
   const user = c.get('user')
   const country = user.country_scope === '*' ? (c.req.query('country') ?? 'TH') : user.country_scope
   const id = c.req.param('id')
 
-  await c.env.DB.prepare(
-    `UPDATE workers SET deleted_at = datetime('now'), status = 'resigned' WHERE id = ? AND country_code = ?`
-  ).bind(id, country).run()
+  await sb.from('workers')
+    .update({ deleted_at: new Date().toISOString(), status: 'resigned' })
+    .eq('id', id)
+    .eq('country_code', country)
 
-  await appendAuditLog(c.env.DB, {
+  await appendAuditLog(sb, {
     user_id: user.id, user_email: user.email,
     action: 'delete', entity: 'worker', entity_id: id, country_code: country,
   })

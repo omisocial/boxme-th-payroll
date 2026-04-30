@@ -6,10 +6,10 @@ import { attendanceRouter } from './routes/attendance'
 import { payrollRouter } from './routes/payroll'
 import { periodsRouter } from './routes/periods'
 import type { Env } from './auth/rbac'
+import { getSupabase } from './db/supabase'
 
 const app = new Hono<{ Bindings: Env }>()
 
-// CORS — same-origin only (Pages Functions share domain, but allow dev localhost)
 app.use('/api/*', cors({
   origin: (origin) => {
     if (!origin) return '*'
@@ -22,40 +22,36 @@ app.use('/api/*', cors({
   credentials: true,
 }))
 
-// Health check
 app.get('/api/health', (c) => c.json({ ok: true, ts: new Date().toISOString() }))
 
-// Mount routers
 app.route('/api/auth', authRouter)
 app.route('/api/workers', workersRouter)
 app.route('/api/attendance', attendanceRouter)
 app.route('/api/payroll', payrollRouter)
 app.route('/api/periods', periodsRouter)
 
-// Cron handler — nightly recompute
+// Cron handler — nightly recompute (protected by secret header)
 app.get('/api/_cron/recompute', async (c) => {
-  // Protected by CF Cron Trigger — only called internally
   const secret = c.req.header('x-cron-secret')
-  if (secret !== (c.env as unknown as Record<string, string>)['CRON_SECRET']) {
+  if (!c.env.CRON_SECRET || secret !== c.env.CRON_SECRET) {
     return c.json({ ok: false }, 401)
   }
 
-  const { results: openPeriods } = await c.env.DB.prepare(
-    `SELECT id, country_code FROM payroll_periods WHERE status = 'open'`
-  ).all<{ id: string; country_code: string }>()
+  const sb = getSupabase(c.env)
+
+  const { data: openPeriods } = await sb.from('payroll_periods')
+    .select('id, country_code')
+    .eq('status', 'open')
 
   let total = 0
   for (const period of openPeriods ?? []) {
-    const { results: rows } = await c.env.DB.prepare(`
-      SELECT a.id FROM attendance_records a
-      WHERE a.country_code = ?
-        AND a.work_date BETWEEN
-          (SELECT from_date FROM payroll_periods WHERE id = ?)
-          AND (SELECT to_date FROM payroll_periods WHERE id = ?)
-        AND a.deleted_at IS NULL
-    `).bind(period.country_code, period.id, period.id).all<{ id: string }>()
+    const p = period as Record<string, unknown>
+    const { count } = await sb.from('attendance_records')
+      .select('id', { count: 'exact', head: true })
+      .eq('country_code', p['country_code'])
+      .is('deleted_at', null)
 
-    total += rows?.length ?? 0
+    total += count ?? 0
   }
 
   return c.json({ ok: true, recomputed: total })

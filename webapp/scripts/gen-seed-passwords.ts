@@ -1,13 +1,9 @@
 #!/usr/bin/env tsx
 /**
- * Generates random passwords for seed accounts, hashes them with bcrypt-compatible
- * format, writes .env.seed (gitignored), and emits 008_seed_ready.sql with hashes.
+ * Generates random passwords for seed accounts, hashes with SHA-256 seed format,
+ * writes .env.seed (gitignored), 008_seed_ready.sql (D1), and supabase_schema_ready.sql.
  *
  * Run: npx tsx scripts/gen-seed-passwords.ts
- *
- * Output:
- *   .env.seed              — plaintext passwords (KEEP PRIVATE, add to 1Password)
- *   api/src/db/008_seed_ready.sql — 008_seed.sql with %%HASH_*%% replaced
  */
 
 import { randomBytes, createHash } from 'node:crypto'
@@ -23,9 +19,6 @@ function genPassword(length = 24): string {
     .slice(0, length)
 }
 
-// Simple SHA-256 hash for seed — in production Workers use Argon2 WASM.
-// We store a marker prefix so the auth layer knows it's a seed hash requiring
-// Argon2 re-hash on first successful login.
 function seedHash(password: string): string {
   const hash = createHash('sha256').update(password).digest('hex')
   return `$seed$sha256$${hash}`
@@ -54,21 +47,42 @@ const envLines = accounts.map(a =>
   `SEED_PASSWORD_${a.key}=${passwords[a.key]}  # ${a.email}`
 ).join('\n')
 
-writeFileSync(resolve(ROOT, '.env.seed'), `# Boxme Payroll — Seed Passwords\n# Generated: ${new Date().toISOString()}\n# Store in 1Password → Boxme > Payroll Seed Accounts\n# DO NOT COMMIT\n\n${envLines}\n`)
+writeFileSync(
+  resolve(ROOT, '.env.seed'),
+  `# Boxme Payroll — Seed Passwords\n# Generated: ${new Date().toISOString()}\n# Store in 1Password → Boxme > Payroll Seed Accounts\n# DO NOT COMMIT\n\n${envLines}\n`
+)
 
-// Write 008_seed_ready.sql — replace INSERT OR IGNORE with UPSERT-style UPDATE
-// so re-running won't skip existing rows with placeholder hashes
-const templatePath = resolve(ROOT, 'api/src/db/008_seed.sql')
-let sql = readFileSync(templatePath, 'utf-8')
-for (const acc of accounts) {
-  sql = sql.replace(new RegExp(acc.placeholder.replace(/%%/g, '%%').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), hashes[acc.key])
+function replacePlaceholders(sql: string): string {
+  for (const acc of accounts) {
+    sql = sql.replace(
+      new RegExp(acc.placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'),
+      hashes[acc.key]
+    )
+  }
+  return sql
 }
-// Also emit UPDATE statements in case rows already exist (fixes INSERT OR IGNORE race)
-const updateStatements = accounts.map(acc =>
-  `UPDATE users SET password_hash='${hashes[acc.key]}', force_password_change=1 WHERE email='${acc.email}';`
-).join('\n')
-sql += '\n-- Force-update password hashes (idempotent)\n' + updateStatements + '\n'
-writeFileSync(resolve(ROOT, 'api/src/db/008_seed_ready.sql'), sql)
+
+// Write 008_seed_ready.sql (for D1 legacy reference)
+const d1TemplatePath = resolve(ROOT, 'api/src/db/008_seed.sql')
+try {
+  let d1Sql = readFileSync(d1TemplatePath, 'utf-8')
+  d1Sql = replacePlaceholders(d1Sql)
+  const updateStatements = accounts.map(acc =>
+    `UPDATE users SET password_hash='${hashes[acc.key]}', force_password_change=1 WHERE email='${acc.email}';`
+  ).join('\n')
+  d1Sql += '\n-- Force-update password hashes (idempotent)\n' + updateStatements + '\n'
+  writeFileSync(resolve(ROOT, 'api/src/db/008_seed_ready.sql'), d1Sql)
+  console.log('✅ api/src/db/008_seed_ready.sql written')
+} catch {
+  console.warn('⚠️  api/src/db/008_seed.sql not found, skipping D1 seed')
+}
+
+// Write supabase_schema_ready.sql (run in Supabase SQL Editor)
+const sbTemplatePath = resolve(ROOT, 'api/src/db/supabase_schema.sql')
+let sbSql = readFileSync(sbTemplatePath, 'utf-8')
+sbSql = replacePlaceholders(sbSql)
+writeFileSync(resolve(ROOT, 'api/src/db/supabase_schema_ready.sql'), sbSql)
+console.log('✅ api/src/db/supabase_schema_ready.sql written')
 
 // Print to console
 console.log('\n====================================================')
@@ -79,6 +93,7 @@ for (const acc of accounts) {
 }
 console.log('====================================================')
 console.log('\n✅ .env.seed written (gitignored)')
-console.log('✅ api/src/db/008_seed_ready.sql written')
 console.log('\n⚠️  Save passwords to 1Password → Boxme > Payroll Seed Accounts')
-console.log('⚠️  Users must change password on first login\n')
+console.log('⚠️  Users must change password on first login')
+console.log('\n📋 To apply to Supabase:')
+console.log('   Run api/src/db/supabase_schema_ready.sql in Supabase SQL Editor\n')

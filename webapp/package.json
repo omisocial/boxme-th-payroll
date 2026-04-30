@@ -19,12 +19,14 @@
     "db:migrate:006": "wrangler d1 execute boxme-payroll --file=../api/src/db/006_exports.sql",
     "db:migrate:007": "wrangler d1 execute boxme-payroll --file=../api/src/db/007_auth.sql",
     "db:seed": "npx tsx scripts/gen-seed-passwords.ts && wrangler d1 execute boxme-payroll --file=../api/src/db/008_seed_ready.sql",
+    "db:seed:supabase": "npx tsx scripts/gen-seed-passwords.ts",
     "db:migrate:local": "npm run db:migrate:001 -- --local && npm run db:migrate:002 -- --local && npm run db:migrate:003 -- --local && npm run db:migrate:004 -- --local && npm run db:migrate:005 -- --local && npm run db:migrate:006 -- --local && npm run db:migrate:007 -- --local",
     "db:seed:local": "npx tsx scripts/gen-seed-passwords.ts && wrangler d1 execute boxme-payroll --local --file=../api/src/db/008_seed_ready.sql",
     "deploy": "npm run build && wrangler pages deploy dist"
   },
   "dependencies": {
     "@hono/zod-validator": "^0.7.6",
+    "@supabase/supabase-js": "^2.105.1",
     "better-auth": "^1.6.9",
     "hono": "^4.12.15",
     "lucide-react": "^1.14.0",
