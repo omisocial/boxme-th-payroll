@@ -1,4 +1,4 @@
-import { Download, FileSpreadsheet, RefreshCw, FileText } from 'lucide-react'
+import { Download, FileSpreadsheet, RefreshCw, FileText, Database } from 'lucide-react'
 import { useI18n } from '../i18n/I18n'
 
 interface Props {
@@ -8,9 +8,10 @@ interface Props {
   onExportDaily: () => void
   onExportWorkers: () => void
   onExportBank: () => void
+  onSaveToDB?: () => void
 }
 
-export default function Toolbar({ fileName, daysCount, onReset, onExportDaily, onExportWorkers, onExportBank }: Props) {
+export default function Toolbar({ fileName, daysCount, onReset, onExportDaily, onExportWorkers, onExportBank, onSaveToDB }: Props) {
   const { t } = useI18n()
   return (
     <div className="card p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -33,6 +34,11 @@ export default function Toolbar({ fileName, daysCount, onReset, onExportDaily, o
         <button onClick={onExportBank} className="btn-secondary text-xs sm:text-sm py-2 sm:py-2.5">
           <FileText size={14} /> {t('tb.exportBank')}
         </button>
+        {onSaveToDB && (
+          <button onClick={onSaveToDB} className="btn-primary text-xs sm:text-sm py-2 sm:py-2.5">
+            <Database size={14} /> Save to DB
+          </button>
+        )}
         <button onClick={onReset} className="btn-secondary text-xs sm:text-sm py-2 sm:py-2.5 text-slate-600">
           <RefreshCw size={14} /> {t('tb.reset')}
         </button>
