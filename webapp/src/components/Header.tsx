@@ -1,6 +1,7 @@
 import { Calculator, BookOpen } from 'lucide-react'
 import { useI18n } from '../i18n/I18n'
 import LangSwitcher from './LangSwitcher'
+import WarehouseSwitcher from './WarehouseSwitcher'
 
 interface Props {
   onOpenHelp: () => void
@@ -30,6 +31,7 @@ export default function Header({ onOpenHelp, children }: Props) {
             <BookOpen size={14} />
             <span className="hidden sm:inline text-slate-700">{t('upload.guide')}</span>
           </button>
+          <WarehouseSwitcher />
           <LangSwitcher />
           {children}
         </div>

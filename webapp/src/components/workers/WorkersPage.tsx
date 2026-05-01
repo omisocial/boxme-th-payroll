@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Plus, Search, ChevronLeft, ChevronRight, Loader2, AlertTriangle, X, Trash2 } from 'lucide-react'
 import { useWorkers, type Worker } from '../../api/useWorkers'
 import { useWarehouses } from '../../api/usePeriods'
+import { useWarehouse } from '../../context/WarehouseContext'
 import type { AuthUser } from '../../auth/useAuth'
 
 interface Props {
@@ -141,8 +142,9 @@ function WorkerModal({
 }
 
 export default function WorkersPage({ user }: Props) {
-  const country = user.country_scope === '*' ? 'TH' : user.country_scope
-  const { workers, total, loading, q, setQ, status, setStatus, page, setPage, createWorker, updateWorker, deleteWorker } = useWorkers(country)
+  const { current: warehouse } = useWarehouse()
+  const country = warehouse?.countryCode ?? (user.country_scope === '*' ? 'TH' : user.country_scope)
+  const { workers, total, loading, q, setQ, status, setStatus, page, setPage, createWorker, updateWorker, deleteWorker } = useWorkers(country, warehouse?.id)
   const [modal, setModal] = useState<{ mode: 'create' | 'edit'; worker: Partial<Worker> | null } | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<Worker | null>(null)
 
@@ -169,9 +171,38 @@ export default function WorkersPage({ user }: Props) {
         )}
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-2">
-        <div className="relative">
+      {/* Filter chips */}
+      <div className="flex flex-wrap items-center gap-2">
+        {([
+          { id: 'all', label: 'All' },
+          { id: 'pending_update', label: 'Chờ cập nhật', tone: 'amber' as const },
+          { id: 'active', label: 'Active' },
+          { id: 'resigned', label: 'Resigned' },
+          { id: 'inactive', label: 'Inactive' },
+        ]).map(chip => {
+          const active = status === chip.id
+          const amber = chip.tone === 'amber'
+          return (
+            <button
+              key={chip.id}
+              onClick={() => { setStatus(chip.id); setPage(1) }}
+              className={[
+                'px-3 py-1.5 rounded-full text-xs font-medium border transition',
+                active
+                  ? amber
+                    ? 'bg-amber-100 border-amber-300 text-amber-900'
+                    : 'bg-blue-600 border-blue-600 text-white'
+                  : amber
+                    ? 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100'
+                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50',
+              ].join(' ')}
+            >
+              {chip.label}
+              {chip.id === 'pending_update' && status === 'pending_update' && total > 0 ? ` (${total})` : ''}
+            </button>
+          )
+        })}
+        <div className="relative ml-auto">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             className="input pl-8 w-56 text-sm"
@@ -180,12 +211,6 @@ export default function WorkersPage({ user }: Props) {
             onChange={e => { setQ(e.target.value); setPage(1) }}
           />
         </div>
-        <select className="input text-sm" value={status} onChange={e => { setStatus(e.target.value); setPage(1) }}>
-          <option value="active">Active</option>
-          <option value="resigned">Resigned</option>
-          <option value="terminated">Terminated</option>
-          <option value="all">All</option>
-        </select>
       </div>
 
       {loading && <div className="flex justify-center py-8"><Loader2 size={24} className="animate-spin text-slate-400" /></div>}
@@ -221,8 +246,12 @@ export default function WorkersPage({ user }: Props) {
                       {w.bank_code ? `${w.bank_code} ${w.bank_account ?? ''}`.trim() : '—'}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${w.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'}`}>
-                        {w.status}
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
+                        w.status === 'active' ? 'bg-green-100 text-green-700'
+                          : w.status === 'pending_update' ? 'bg-amber-100 text-amber-800'
+                          : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {w.status === 'pending_update' ? 'Chờ cập nhật' : w.status}
                       </span>
                     </td>
                     {canHr && (

@@ -78,6 +78,49 @@ export function guard(minRole = 'viewer', countryParam = 'country') {
   return [requireAuth(), requireRole(minRole), requireCountry(countryParam)]
 }
 
+// Look up the warehouse ids accessible to a user. Super admins (country_scope='*')
+// have access to all warehouses; others use the user_warehouses join, falling back
+// to users.warehouse_id for backward compatibility.
+export async function getAccessibleWarehouseIds(
+  db: D1Database,
+  user: { id: string; role: string; country_scope: string; warehouse_id: string | null },
+): Promise<string[] | '*'> {
+  if (user.role === 'super_admin' && user.country_scope === '*') return '*'
+
+  const { results } = await db.prepare(
+    'SELECT warehouse_id FROM user_warehouses WHERE user_id = ?'
+  ).bind(user.id).all<{ warehouse_id: string }>()
+
+  const ids = (results ?? []).map(r => r.warehouse_id)
+  if (user.warehouse_id && !ids.includes(user.warehouse_id)) ids.push(user.warehouse_id)
+  return ids
+}
+
+// Require the request to target a warehouse the user has access to. The warehouse id
+// is read from a query param (default 'warehouse_id') or 'x-warehouse-id' header.
+export function requireWarehouseAccess(paramName = 'warehouse_id') {
+  return async (c: HonoCtx, next: Next) => {
+    const user = c.get('user')
+    if (!user) return c.json({ success: false, message: 'Unauthorized' }, 401)
+
+    const requested =
+      c.req.query(paramName) ??
+      c.req.header('x-warehouse-id') ??
+      null
+
+    if (!requested) {
+      return c.json({ success: false, message: 'warehouse_id is required' }, 400)
+    }
+
+    const allowed = await getAccessibleWarehouseIds(c.env.DB, user)
+    if (allowed === '*') return next()
+    if (!allowed.includes(requested)) {
+      return c.json({ success: false, message: 'Forbidden: no access to warehouse' }, 403)
+    }
+    return next()
+  }
+}
+
 // Cookie helpers
 export function setSessionCookie(c: HonoCtx, token: string) {
   c.header(

@@ -225,6 +225,59 @@ export const DICT = {
   'common.cancel': { en: 'Cancel', vi: 'Huỷ', th: 'ยกเลิก' },
   'common.continue': { en: 'Continue', vi: 'Tiếp tục', th: 'ดำเนินการต่อ' },
   'common.lang': { en: 'Language', vi: 'Ngôn ngữ', th: 'ภาษา' },
+  'common.save': { en: 'Save', vi: 'Lưu', th: 'บันทึก' },
+  'common.edit': { en: 'Edit', vi: 'Sửa', th: 'แก้ไข' },
+  'common.delete': { en: 'Delete', vi: 'Xoá', th: 'ลบ' },
+  'common.loading': { en: 'Loading…', vi: 'Đang tải…', th: 'กำลังโหลด…' },
+  'common.noData': { en: 'No data found.', vi: 'Không có dữ liệu.', th: 'ไม่พบข้อมูล' },
+
+  // Navigation
+  'nav.payroll': { en: 'Payroll', vi: 'Tính lương', th: 'คำนวณเงินเดือน' },
+  'nav.workers': { en: 'Workers', vi: 'Nhân viên', th: 'พนักงาน' },
+  'nav.admin': { en: 'Admin', vi: 'Quản trị', th: 'ผู้ดูแล' },
+  'nav.settings': { en: 'Settings', vi: 'Cài đặt', th: 'ตั้งค่า' },
+
+  // Workers page
+  'workers.title': { en: 'Workers', vi: 'Nhân viên', th: 'พนักงาน' },
+  'workers.add': { en: 'Add Worker', vi: 'Thêm nhân viên', th: 'เพิ่มพนักงาน' },
+  'workers.search': { en: 'Search name / code…', vi: 'Tìm tên / mã…', th: 'ค้นหาชื่อ / รหัส…' },
+  'workers.filter.all': { en: 'All', vi: 'Tất cả', th: 'ทั้งหมด' },
+  'workers.filter.pending': { en: 'Pending update', vi: 'Chờ cập nhật', th: 'รอการอัปเดต' },
+  'workers.filter.active': { en: 'Active', vi: 'Đang làm', th: 'ใช้งาน' },
+  'workers.filter.resigned': { en: 'Resigned', vi: 'Đã nghỉ', th: 'ลาออก' },
+  'workers.filter.inactive': { en: 'Inactive', vi: 'Không hoạt động', th: 'ไม่ใช้งาน' },
+  'workers.status.active': { en: 'Active', vi: 'Đang làm', th: 'ใช้งาน' },
+  'workers.status.pending_update': { en: 'Pending update', vi: 'Chờ cập nhật', th: 'รอการอัปเดต' },
+  'workers.status.resigned': { en: 'Resigned', vi: 'Đã nghỉ', th: 'ลาออก' },
+  'workers.status.inactive': { en: 'Inactive', vi: 'Không hoạt động', th: 'ไม่ใช้งาน' },
+  'workers.col.code': { en: 'Code', vi: 'Mã', th: 'รหัส' },
+  'workers.col.name': { en: 'Name', vi: 'Họ tên', th: 'ชื่อ' },
+  'workers.col.dept': { en: 'Dept', vi: 'Bộ phận', th: 'แผนก' },
+  'workers.col.bank': { en: 'Bank', vi: 'Ngân hàng', th: 'ธนาคาร' },
+  'workers.col.status': { en: 'Status', vi: 'Trạng thái', th: 'สถานะ' },
+  'workers.remove.title': { en: 'Remove Worker?', vi: 'Xoá nhân viên?', th: 'ลบพนักงาน?' },
+  'workers.remove.body': { en: 'This will soft-delete {name} and mark them as resigned. The record is preserved for payroll history.', vi: 'Hành động này sẽ xoá mềm {name} và chuyển trạng thái thành đã nghỉ. Hồ sơ được giữ lại cho lịch sử lương.', th: 'การกระทำนี้จะลบ {name} แบบ soft-delete และเปลี่ยนสถานะเป็นลาออก บันทึกยังคงอยู่สำหรับประวัติเงินเดือน' },
+  'workers.noFound': { en: 'No workers found.', vi: 'Không tìm thấy nhân viên.', th: 'ไม่พบพนักงาน' },
+  'workers.form.code': { en: 'Employee Code', vi: 'Mã nhân viên', th: 'รหัสพนักงาน' },
+  'workers.form.nameLocal': { en: 'Full Name', vi: 'Họ tên (tiếng Việt)', th: 'ชื่อ-นามสกุล' },
+  'workers.form.nameEn': { en: 'Full Name (English)', vi: 'Họ tên (tiếng Anh)', th: 'ชื่อ-นามสกุล (อังกฤษ)' },
+  'workers.form.warehouse': { en: 'Warehouse', vi: 'Kho', th: 'คลังสินค้า' },
+  'workers.form.dept': { en: 'Department', vi: 'Bộ phận', th: 'แผนก' },
+  'workers.form.jobType': { en: 'Job Type', vi: 'Loại hợp đồng', th: 'ประเภทงาน' },
+  'workers.form.bankCode': { en: 'Bank Code', vi: 'Ngân hàng', th: 'รหัสธนาคาร' },
+  'workers.form.bankAccount': { en: 'Bank Account', vi: 'Số tài khoản', th: 'หมายเลขบัญชี' },
+  'workers.form.phone': { en: 'Phone', vi: 'Điện thoại', th: 'โทรศัพท์' },
+  'workers.form.startDate': { en: 'Start Date', vi: 'Ngày bắt đầu', th: 'วันที่เริ่มงาน' },
+
+  // Payroll badges (post-compute warnings)
+  'badge.pendingWorkers': { en: '{n} new workers need info', vi: '{n} CTV mới chưa có thông tin', th: '{n} พนักงานใหม่ยังไม่มีข้อมูล' },
+  'badge.openWorkers': { en: 'Open Workers', vi: 'Mở Workers', th: 'เปิดพนักงาน' },
+  'badge.otOutlier': { en: '{n} days with OT > 4h', vi: '{n} ngày OT > 4h', th: '{n} วันมี OT > 4 ชม.' },
+  'badge.totalGross': { en: 'Total gross', vi: 'Tổng gross', th: 'รวม Gross' },
+
+  // Warehouse switcher
+  'warehouse.label': { en: 'Warehouse', vi: 'Kho', th: 'คลังสินค้า' },
+  'warehouse.switch': { en: 'Switch warehouse', vi: 'Đổi kho', th: 'เปลี่ยนคลัง' },
 } as const
 
 export type DictKey = keyof typeof DICT

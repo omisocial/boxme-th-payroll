@@ -1,10 +1,33 @@
 import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
 import { z } from 'zod'
-import { guard, type Env } from '../auth/rbac'
+import { guard, getAccessibleWarehouseIds, type Env } from '../auth/rbac'
 import { appendAuditLog } from '../db/queries'
+import { bulkResolveWorkers } from '../services/worker-resolver'
 
 const workersRouter = new Hono<{ Bindings: Env }>()
+
+// POST /api/workers/resolve — match attendance names to workers, auto-create
+// missing ones with status='pending_update'.
+const resolveSchema = z.object({
+  warehouseId: z.string(),
+  fullNames: z.array(z.string()).min(1),
+})
+workersRouter.post('/resolve', ...guard('hr'), zValidator('json', resolveSchema), async (c) => {
+  const user = c.get('user')
+  const country = user.country_scope === '*' ? (c.req.query('country') ?? 'TH') : user.country_scope
+  const { warehouseId, fullNames } = c.req.valid('json')
+
+  // Verify the user can target this warehouse.
+  const allowed = await getAccessibleWarehouseIds(c.env.DB, user)
+  if (allowed !== '*' && !allowed.includes(warehouseId)) {
+    return c.json({ success: false, message: 'Forbidden: no access to warehouse' }, 403)
+  }
+
+  const results = await bulkResolveWorkers(c.env.DB, country, warehouseId, fullNames)
+  const created = results.filter(r => r.created).length
+  return c.json({ success: true, data: { results, summary: { total: results.length, created } } })
+})
 
 const workerCreateSchema = z.object({
   warehouseId: z.string(),
