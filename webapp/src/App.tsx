@@ -10,27 +10,29 @@ import HelpPanel from './components/HelpPanel'
 import LoginPage from './components/LoginPage'
 import ChangePasswordPage from './components/ChangePasswordPage'
 import { parseWorkbook } from './payroll/parser'
-import { computePayroll, DEFAULT_CONFIG } from './payroll/engine'
+import { computePayroll } from './payroll/engine'
 import { summarizePeriod, summarizeWorkers } from './payroll/aggregate'
 import { exportDailyXlsx, exportWorkerSummaryXlsx, exportBankCsv } from './payroll/exporter'
 import { downloadTemplate } from './payroll/template'
 import { saveMapping, type ColumnMapping } from './payroll/mapping'
 import type { ParsedWorkbook, PayrollResult, WorkerSummary } from './payroll/types'
-import { AlertTriangle, Sparkles, Settings, CheckCircle2, LogOut, User, BarChart2, Users, Shield, Leaf, SlidersHorizontal } from 'lucide-react'
+import { AlertTriangle, Sparkles, Settings, CheckCircle2, LogOut, User, Users, Shield, Leaf, SlidersHorizontal } from 'lucide-react'
 import { useI18n } from './i18n/I18n'
 import { useAuth } from './auth/useAuth'
-import PeriodsPage from './components/periods/PeriodsPage'
+import { useEngineConfig } from './context/ConfigContext'
+import PayrollBadges from './features/payroll/PayrollBadges'
 import WorkersPage from './components/workers/WorkersPage'
 import AdminPage from './components/admin/AdminPage'
 import SeasonalWorkersPage from './components/seasonal/SeasonalWorkersPage'
 import SettingsPage from './components/settings/SettingsPage'
 import ServerImportDialog from './components/ServerImportDialog'
 
-type View = 'payroll' | 'periods' | 'workers' | 'seasonal' | 'settings' | 'admin'
+type View = 'payroll' | 'workers' | 'seasonal' | 'settings' | 'admin'
 
 function App() {
   const { t } = useI18n()
   const auth = useAuth()
+  const { config, setConfig } = useEngineConfig()
 
   const [view, setView] = useState<View>('payroll')
   const [workbook, setWorkbook] = useState<ParsedWorkbook | null>(null)
@@ -44,7 +46,6 @@ function App() {
   const [showConfig, setShowConfig] = useState(false)
   const [helpTab, setHelpTab] = useState<'guide' | 'formula' | null>(null)
   const [toast, setToast] = useState<string | null>(null)
-  const [config, setConfig] = useState({ ...DEFAULT_CONFIG })
 
   const computed = useMemo(() => {
     if (!workbook || workbook.requiresMapping) return null
@@ -125,7 +126,6 @@ function App() {
 
   const navTabs: { id: View; label: string; icon: React.ReactNode }[] = [
     { id: 'payroll', label: 'Payroll', icon: <Sparkles size={14} /> },
-    { id: 'periods', label: 'Periods', icon: <BarChart2 size={14} /> },
     { id: 'workers', label: 'Workers', icon: <Users size={14} /> },
     { id: 'seasonal', label: 'Seasonal', icon: <Leaf size={14} /> },
     ...(canAdmin ? [{ id: 'settings' as View, label: 'Settings', icon: <SlidersHorizontal size={14} /> }] : []),
@@ -174,7 +174,6 @@ function App() {
       </div>
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-8 space-y-4 sm:space-y-6">
-        {view === 'periods' && <PeriodsPage user={auth.user} />}
         {view === 'workers' && <WorkersPage user={auth.user} />}
         {view === 'seasonal' && <SeasonalWorkersPage user={auth.user} />}
         {view === 'settings' && canAdmin && <SettingsPage user={auth.user} />}
@@ -226,6 +225,14 @@ function App() {
                 </ul>
               </div>
             )}
+
+            <PayrollBadges
+              rows={computed.rows}
+              workers={computed.workers}
+              members={workbook.members}
+              currencySymbol={config.currencySymbol}
+              onOpenPendingWorkers={() => setView('workers')}
+            />
 
             <StatCards summary={computed.summary} />
 

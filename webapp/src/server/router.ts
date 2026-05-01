@@ -2,6 +2,8 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { authRouter } from './routes/auth'
 import { workersRouter } from './routes/workers'
+import { warehousesRouter } from './routes/warehouses'
+import { engineConfigRouter } from './routes/engineConfig'
 import { attendanceRouter } from './routes/attendance'
 import { payrollRouter } from './routes/payroll'
 import { periodsRouter } from './routes/periods'
@@ -19,7 +21,7 @@ app.use('/api/*', cors({
     if (origin.includes('boxme.tech') || origin.includes('pages.dev')) return origin
     return null
   },
-  allowHeaders: ['Content-Type', 'X-Country'],
+  allowHeaders: ['Content-Type', 'X-Country', 'X-Warehouse-Id'],
   allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   credentials: true,
 }))
@@ -27,6 +29,8 @@ app.use('/api/*', cors({
 app.get('/api/health', (c) => c.json({ ok: true, ts: new Date().toISOString() }))
 
 app.route('/api/auth', authRouter)
+app.route('/api/warehouses', warehousesRouter)
+app.route('/api/engine-config', engineConfigRouter)
 app.route('/api/workers', workersRouter)
 app.route('/api/attendance', attendanceRouter)
 app.route('/api/payroll', payrollRouter)

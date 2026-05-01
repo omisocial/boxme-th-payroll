@@ -15,7 +15,8 @@ export interface Worker {
   phone: string | null
   start_date: string | null
   end_date: string | null
-  status: 'active' | 'resigned' | 'terminated'
+  status: 'active' | 'resigned' | 'terminated' | 'pending_update' | 'inactive' | 'suspended'
+  created_via?: 'manual' | 'attendance_import' | 'api'
   notes: string | null
   created_at: string
 }
@@ -25,7 +26,7 @@ async function apiFetch<T>(path: string, opts?: RequestInit): Promise<{ success:
   return res.json()
 }
 
-export function useWorkers(country: string) {
+export function useWorkers(country: string, warehouseId?: string | null) {
   const [workers, setWorkers] = useState<Worker[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -37,13 +38,14 @@ export function useWorkers(country: string) {
     setLoading(true)
     const params = new URLSearchParams({ country, page: String(page), limit: '50', status })
     if (q) params.set('q', q)
+    if (warehouseId) params.set('warehouse_id', warehouseId)
     const json = await apiFetch<Worker[]>(`/api/workers?${params}`)
     if (json.success && json.data) {
       setWorkers(json.data)
       setTotal(json.meta?.total ?? json.data.length)
     }
     setLoading(false)
-  }, [country, page, q, status])
+  }, [country, warehouseId, page, q, status])
 
   useEffect(() => { refresh() }, [refresh])
 
