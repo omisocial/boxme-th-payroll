@@ -262,6 +262,63 @@ workersRouter.delete('/:id', ...guard('hr'), async (c) => {
   return c.json({ success: true })
 })
 
+// POST /api/workers/resolve — match attendance names to DB workers; auto-create
+// missing ones with status='pending_update' and created_via='attendance_import'.
+workersRouter.post('/resolve', ...guard('hr'), async (c) => {
+  const sb = getSupabase(c.env)
+  const user = c.get('user')
+  const country = user.country_scope === '*' ? (c.req.query('country') ?? 'TH') : user.country_scope
+  const { warehouseId, fullNames } = await c.req.json<{ warehouseId: string; fullNames: string[] }>()
+
+  if (!warehouseId || !Array.isArray(fullNames) || fullNames.length === 0) {
+    return c.json({ success: false, message: 'warehouseId and fullNames required' }, 400)
+  }
+
+  const unique = [...new Set(fullNames.map(n => n.trim()).filter(Boolean))]
+
+  // Fetch existing active workers for this warehouse
+  const { data: existing } = await sb.from('workers')
+    .select('id, name_local')
+    .eq('country_code', country)
+    .eq('warehouse_id', warehouseId)
+    .is('deleted_at', null)
+
+  const existingMap = new Map<string, string>()
+  for (const w of existing ?? []) {
+    existingMap.set((w as { name_local: string }).name_local.toLowerCase(), (w as { id: string }).id)
+  }
+
+  const results: Array<{ name: string; workerId: string; created: boolean }> = []
+
+  for (const name of unique) {
+    const existing_id = existingMap.get(name.toLowerCase())
+    if (existing_id) {
+      results.push({ name, workerId: existing_id, created: false })
+      continue
+    }
+    // Auto-create with pending_update
+    const code = `AUTO-${Date.now().toString(36).toUpperCase()}`
+    const { data: created, error } = await sb.from('workers')
+      .insert({
+        country_code: country,
+        warehouse_id: warehouseId,
+        code,
+        name_local: name,
+        status: 'pending_update',
+        created_via: 'attendance_import',
+        job_type_code: 'GENERAL',
+      })
+      .select('id')
+      .single()
+
+    if (error) continue
+    results.push({ name, workerId: (created as { id: string }).id, created: true })
+  }
+
+  const createdCount = results.filter(r => r.created).length
+  return c.json({ success: true, data: { results, summary: { total: results.length, created: createdCount } } })
+})
+
 function maskAccount(acc?: string): string {
   if (!acc || acc.length < 4) return '****'
   return '****' + acc.slice(-4)

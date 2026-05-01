@@ -56,17 +56,41 @@ export type Flag =
   | 'UNKNOWN_SHIFT'
 
 export interface EngineConfig {
+  countryCode: string
+  warehouseId?: string | null
+  currency: string
+  currencySymbol: string
   defaultDailyRate: number
   otMultiplier: number
   lateBufferMinutes: number
   lateRoundingUnit: number
   paidLeaveClassifications: string[]
+  // Department classification keywords (per locale)
+  bmPrefixes: string[]   // e.g. ["bm"]
+  dwPrefixes: string[]   // e.g. ["dw"]
+  internKeywords: string[]
+  housekeeperKeywords: string[]
+  // Note-based flag detection (per locale)
+  sickLeaveKeywords: string[]
+  personalLeaveKeywords: string[]
+  manualCheckinKeywords: string[]
 }
 
 export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
+  countryCode: 'TH',
+  warehouseId: null,
+  currency: 'THB',
+  currencySymbol: '฿',
   defaultDailyRate: 500,
   otMultiplier: 1.5,
   lateBufferMinutes: 0,
   lateRoundingUnit: 0,
   paidLeaveClassifications: [],
+  bmPrefixes: ['bm'],
+  dwPrefixes: ['dw'],
+  internKeywords: ['นักศึกษา', 'นศ.'],
+  housekeeperKeywords: ['แม่บ้าน', 'แมบ้าน'],
+  sickLeaveKeywords: ['ลาป่วย', 'ลาไปหาหมอ', 'หาหมอ'],
+  personalLeaveKeywords: ['ลากิจ', 'ลาบ่าย', 'ลางานช่วงบ่าย', 'แจ้งลา', 'ลากลับ'],
+  manualCheckinKeywords: ['โทรศัพท์เข้าแอป', 'ไม่ได้เช็คอิน', 'แอปไม่ได้'],
 }
