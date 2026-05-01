@@ -16,14 +16,16 @@ import { exportDailyXlsx, exportWorkerSummaryXlsx, exportBankCsv } from './payro
 import { downloadTemplate } from './payroll/template'
 import { saveMapping, type ColumnMapping } from './payroll/mapping'
 import type { ParsedWorkbook, PayrollResult, WorkerSummary } from './payroll/types'
-import { AlertTriangle, Sparkles, Settings, CheckCircle2, LogOut, User, BarChart2, Users, Shield } from 'lucide-react'
+import { AlertTriangle, Sparkles, Settings, CheckCircle2, LogOut, User, BarChart2, Users, Shield, Leaf, SlidersHorizontal } from 'lucide-react'
 import { useI18n } from './i18n/I18n'
 import { useAuth } from './auth/useAuth'
 import PeriodsPage from './components/periods/PeriodsPage'
 import WorkersPage from './components/workers/WorkersPage'
 import AdminPage from './components/admin/AdminPage'
+import SeasonalWorkersPage from './components/seasonal/SeasonalWorkersPage'
+import SettingsPage from './components/settings/SettingsPage'
 
-type View = 'payroll' | 'periods' | 'workers' | 'admin'
+type View = 'payroll' | 'periods' | 'workers' | 'seasonal' | 'settings' | 'admin'
 
 function App() {
   const { t } = useI18n()
@@ -121,6 +123,8 @@ function App() {
     { id: 'payroll', label: 'Payroll', icon: <Sparkles size={14} /> },
     { id: 'periods', label: 'Periods', icon: <BarChart2 size={14} /> },
     { id: 'workers', label: 'Workers', icon: <Users size={14} /> },
+    { id: 'seasonal', label: 'Seasonal', icon: <Leaf size={14} /> },
+    ...(canAdmin ? [{ id: 'settings' as View, label: 'Settings', icon: <SlidersHorizontal size={14} /> }] : []),
     ...(canAdmin ? [{ id: 'admin' as View, label: 'Admin', icon: <Shield size={14} /> }] : []),
   ]
 
@@ -168,6 +172,8 @@ function App() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-8 space-y-4 sm:space-y-6">
         {view === 'periods' && <PeriodsPage user={auth.user} />}
         {view === 'workers' && <WorkersPage user={auth.user} />}
+        {view === 'seasonal' && <SeasonalWorkersPage user={auth.user} />}
+        {view === 'settings' && canAdmin && <SettingsPage user={auth.user} />}
         {view === 'admin' && canAdmin && <AdminPage user={auth.user} />}
 
         {view === 'payroll' && !workbook && !pendingHeaders && (

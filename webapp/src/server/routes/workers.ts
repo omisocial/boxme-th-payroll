@@ -46,6 +46,8 @@ workersRouter.get('/', ...guard('viewer'), async (c) => {
   const dept = c.req.query('dept')
   const status = c.req.query('status') ?? 'active'
   const q = c.req.query('q')
+  const jobType = c.req.query('job_type')
+  const warehouseId = c.req.query('warehouse_id')
   const page = parseInt(c.req.query('page') ?? '1')
   const limit = Math.min(parseInt(c.req.query('limit') ?? '50'), 200)
   const offset = (page - 1) * limit
@@ -57,6 +59,8 @@ workersRouter.get('/', ...guard('viewer'), async (c) => {
 
   if (status !== 'all') query = query.eq('status', status)
   if (dept) query = query.eq('department_code', dept)
+  if (jobType) query = query.eq('job_type_code', jobType)
+  if (warehouseId) query = query.eq('warehouse_id', warehouseId)
   if (q) query = query.or(`name_local.ilike.%${q}%,name_en.ilike.%${q}%,code.ilike.%${q}%`)
 
   const { data, count, error } = await query
@@ -183,6 +187,60 @@ workersRouter.patch('/:id', ...guard('hr'), async (c) => {
   })
 
   return c.json({ success: true, data: updated })
+})
+
+// GET /api/workers/:id/payments — payroll period lines for one worker
+workersRouter.get('/:id/payments', ...guard('viewer'), async (c) => {
+  const sb = getSupabase(c.env)
+  const user = c.get('user')
+  const country = user.country_scope === '*' ? (c.req.query('country') ?? 'TH') : user.country_scope
+  const workerId = c.req.param('id')
+
+  const { data: worker } = await sb.from('workers')
+    .select('id')
+    .eq('id', workerId)
+    .eq('country_code', country)
+    .maybeSingle()
+
+  if (!worker) return c.json({ success: false, message: 'Not found' }, 404)
+
+  const { data, error } = await sb.from('payroll_period_lines')
+    .select('id, period_id, shifts, total_gross_thb, total_ot_thb, total_late_thb, total_damage_thb, net_pay_thb, computed_at, payroll_periods(name, from_date, to_date, status)')
+    .eq('worker_id', workerId)
+    .order('computed_at', { ascending: false })
+    .limit(24)
+
+  if (error) return c.json({ success: false, message: error.message }, 500)
+  return c.json({ success: true, data: data ?? [] })
+})
+
+// GET /api/workers/:id/attendance — recent attendance records for one worker
+workersRouter.get('/:id/attendance', ...guard('viewer'), async (c) => {
+  const sb = getSupabase(c.env)
+  const user = c.get('user')
+  const country = user.country_scope === '*' ? (c.req.query('country') ?? 'TH') : user.country_scope
+  const workerId = c.req.param('id')
+  const page = parseInt(c.req.query('page') ?? '1')
+  const limit = Math.min(parseInt(c.req.query('limit') ?? '30'), 100)
+  const offset = (page - 1) * limit
+
+  const { data: worker } = await sb.from('workers')
+    .select('id')
+    .eq('id', workerId)
+    .eq('country_code', country)
+    .maybeSingle()
+
+  if (!worker) return c.json({ success: false, message: 'Not found' }, 404)
+
+  const { data, count, error } = await sb.from('attendance_records')
+    .select('id, work_date, checkin, checkout, shift_code, job_type_code, note, status, ot_before_hours, ot_after_hours', { count: 'exact' })
+    .eq('worker_id', workerId)
+    .is('deleted_at', null)
+    .order('work_date', { ascending: false })
+    .range(offset, offset + limit - 1)
+
+  if (error) return c.json({ success: false, message: error.message }, 500)
+  return c.json({ success: true, data: data ?? [], meta: { total: count ?? 0, page, limit } })
 })
 
 // DELETE /api/workers/:id — soft delete
