@@ -1,3 +1,23 @@
 name = "boxme-th-payroll"
-compatibility_date = "2024-12-01"
+compatibility_date = "2026-04-30"
+compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "./dist"
+
+# ─── Environment variables ─────────────────────────────────────────────────────
+
+[vars]
+DEFAULT_COUNTRY = "TH"
+APP_URL = "https://payroll.boxme.tech"
+SUPABASE_URL = "https://zdpxjgrvjapezyihunzn.supabase.co"
+
+# Secrets — set via: wrangler secret put <NAME>
+# SUPABASE_SERVICE_ROLE_KEY
+# RESEND_API_KEY
+# CRON_SECRET
+
+# ─── Dev local overrides ───────────────────────────────────────────────────────
+# Create webapp/.dev.vars with:
+#   SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>
+[dev]
+port = 8788
+local_protocol = "http"

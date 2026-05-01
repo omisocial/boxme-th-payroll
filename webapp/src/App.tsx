@@ -7,6 +7,8 @@ import WorkerTable from './components/WorkerTable'
 import WorkerDetail from './components/WorkerDetail'
 import MappingDialog from './components/MappingDialog'
 import HelpPanel from './components/HelpPanel'
+import LoginPage from './components/LoginPage'
+import ChangePasswordPage from './components/ChangePasswordPage'
 import { parseWorkbook } from './payroll/parser'
 import { computePayroll, DEFAULT_CONFIG } from './payroll/engine'
 import { summarizePeriod, summarizeWorkers } from './payroll/aggregate'
@@ -14,11 +16,22 @@ import { exportDailyXlsx, exportWorkerSummaryXlsx, exportBankCsv } from './payro
 import { downloadTemplate } from './payroll/template'
 import { saveMapping, type ColumnMapping } from './payroll/mapping'
 import type { ParsedWorkbook, PayrollResult, WorkerSummary } from './payroll/types'
-import { AlertTriangle, Sparkles, Settings, CheckCircle2 } from 'lucide-react'
+import { AlertTriangle, Sparkles, Settings, CheckCircle2, LogOut, User, BarChart2, Users, Shield, Leaf, SlidersHorizontal } from 'lucide-react'
 import { useI18n } from './i18n/I18n'
+import { useAuth } from './auth/useAuth'
+import PeriodsPage from './components/periods/PeriodsPage'
+import WorkersPage from './components/workers/WorkersPage'
+import AdminPage from './components/admin/AdminPage'
+import SeasonalWorkersPage from './components/seasonal/SeasonalWorkersPage'
+import SettingsPage from './components/settings/SettingsPage'
+
+type View = 'payroll' | 'periods' | 'workers' | 'seasonal' | 'settings' | 'admin'
 
 function App() {
   const { t } = useI18n()
+  const auth = useAuth()
+
+  const [view, setView] = useState<View>('payroll')
   const [workbook, setWorkbook] = useState<ParsedWorkbook | null>(null)
   const [pendingBuffer, setPendingBuffer] = useState<{ buf: ArrayBuffer; name: string } | null>(null)
   const [pendingHeaders, setPendingHeaders] = useState<{ headers: (string | null)[]; mapping: ColumnMapping } | null>(null)
@@ -37,6 +50,23 @@ function App() {
     const workers = summarizeWorkers(rows, workbook.members)
     return { rows, summary, workers }
   }, [workbook, config])
+
+  // Auth gates
+  if (auth.loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  if (!auth.user) {
+    return <LoginPage onLogin={auth.login} />
+  }
+
+  if (auth.user.force_password_change) {
+    return <ChangePasswordPage onChangePassword={auth.changePassword} />
+  }
 
   async function handleFile(buf: ArrayBuffer, name: string) {
     setLoading(true)
@@ -79,11 +109,74 @@ function App() {
     setPendingBuffer(null)
   }
 
+  const roleLabel: Record<string, string> = {
+    super_admin: 'Super Admin',
+    country_admin: 'Country Admin',
+    hr: 'HR',
+    supervisor: 'Supervisor',
+    viewer: 'Viewer',
+  }
+
+  const canAdmin = auth.user.role === 'super_admin' || auth.user.role === 'country_admin'
+
+  const navTabs: { id: View; label: string; icon: React.ReactNode }[] = [
+    { id: 'payroll', label: 'Payroll', icon: <Sparkles size={14} /> },
+    { id: 'periods', label: 'Periods', icon: <BarChart2 size={14} /> },
+    { id: 'workers', label: 'Workers', icon: <Users size={14} /> },
+    { id: 'seasonal', label: 'Seasonal', icon: <Leaf size={14} /> },
+    ...(canAdmin ? [{ id: 'settings' as View, label: 'Settings', icon: <SlidersHorizontal size={14} /> }] : []),
+    ...(canAdmin ? [{ id: 'admin' as View, label: 'Admin', icon: <Shield size={14} /> }] : []),
+  ]
+
   return (
     <div className="min-h-screen flex flex-col">
-      <Header onOpenHelp={() => setHelpTab('guide')} />
+      <Header onOpenHelp={() => setHelpTab('guide')}>
+        {/* User badge in header */}
+        <div className="flex items-center gap-2 ml-auto">
+          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 text-xs text-slate-600">
+            <User size={12} />
+            <span>{auth.user.email}</span>
+            <span className="px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
+              {roleLabel[auth.user.role] ?? auth.user.role}
+            </span>
+          </div>
+          <button
+            onClick={auth.logout}
+            className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition-colors"
+            title="Sign out"
+          >
+            <LogOut size={16} />
+          </button>
+        </div>
+      </Header>
+
+      {/* Tab navigation */}
+      <div className="bg-white border-b border-slate-200 sticky top-[57px] sm:top-[73px] z-20">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 flex gap-0.5 overflow-x-auto">
+          {navTabs.map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setView(tab.id)}
+              className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition -mb-px ${
+                view === tab.id
+                  ? 'border-blue-600 text-blue-700'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+              }`}
+            >
+              {tab.icon} {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-8 space-y-4 sm:space-y-6">
-        {!workbook && !pendingHeaders && (
+        {view === 'periods' && <PeriodsPage user={auth.user} />}
+        {view === 'workers' && <WorkersPage user={auth.user} />}
+        {view === 'seasonal' && <SeasonalWorkersPage user={auth.user} />}
+        {view === 'settings' && canAdmin && <SettingsPage user={auth.user} />}
+        {view === 'admin' && canAdmin && <AdminPage user={auth.user} />}
+
+        {view === 'payroll' && !workbook && !pendingHeaders && (
           <>
             <div className="text-center max-w-2xl mx-auto pt-2 sm:pt-8">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-medium mb-3 sm:mb-4">
@@ -107,7 +200,7 @@ function App() {
           </>
         )}
 
-        {workbook && computed && (
+        {view === 'payroll' && workbook && computed && (
           <>
             <Toolbar
               fileName={workbook.fileName}

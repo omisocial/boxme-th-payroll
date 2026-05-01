@@ -4,9 +4,10 @@ import LangSwitcher from './LangSwitcher'
 
 interface Props {
   onOpenHelp: () => void
+  children?: React.ReactNode
 }
 
-export default function Header({ onOpenHelp }: Props) {
+export default function Header({ onOpenHelp, children }: Props) {
   const { t } = useI18n()
   return (
     <header className="sticky top-0 z-30 bg-white/85 backdrop-blur-md border-b border-slate-200/60">
@@ -30,6 +31,7 @@ export default function Header({ onOpenHelp }: Props) {
             <span className="hidden sm:inline text-slate-700">{t('upload.guide')}</span>
           </button>
           <LangSwitcher />
+          {children}
         </div>
       </div>
     </header>
