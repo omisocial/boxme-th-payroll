@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import Header from './components/Header'
 import Uploader from './components/Uploader'
 import StatCards from './components/StatCards'
@@ -24,6 +24,7 @@ import WorkersPage from './components/workers/WorkersPage'
 import AdminPage from './components/admin/AdminPage'
 import SeasonalWorkersPage from './components/seasonal/SeasonalWorkersPage'
 import SettingsPage from './components/settings/SettingsPage'
+import ServerImportDialog from './components/ServerImportDialog'
 
 type View = 'payroll' | 'periods' | 'workers' | 'seasonal' | 'settings' | 'admin'
 
@@ -33,6 +34,8 @@ function App() {
 
   const [view, setView] = useState<View>('payroll')
   const [workbook, setWorkbook] = useState<ParsedWorkbook | null>(null)
+  const rawFileRef = useRef<{ buf: ArrayBuffer; name: string } | null>(null)
+  const [showServerImport, setShowServerImport] = useState(false)
   const [pendingBuffer, setPendingBuffer] = useState<{ buf: ArrayBuffer; name: string } | null>(null)
   const [pendingHeaders, setPendingHeaders] = useState<{ headers: (string | null)[]; mapping: ColumnMapping } | null>(null)
   const [loading, setLoading] = useState(false)
@@ -69,6 +72,7 @@ function App() {
   }
 
   async function handleFile(buf: ArrayBuffer, name: string) {
+    rawFileRef.current = { buf, name }
     setLoading(true)
     setErr(null)
     try {
@@ -205,10 +209,11 @@ function App() {
             <Toolbar
               fileName={workbook.fileName}
               daysCount={workbook.daysFound.length}
-              onReset={() => { setWorkbook(null); setErr(null) }}
+              onReset={() => { setWorkbook(null); setErr(null); rawFileRef.current = null }}
               onExportDaily={() => exportDailyXlsx(computed.rows, `payroll-daily-${stamp()}.xlsx`)}
               onExportWorkers={() => exportWorkerSummaryXlsx(computed.workers, `payroll-workers-${stamp()}.xlsx`)}
               onExportBank={() => exportBankCsv(computed.workers, 'ALL', `bank-export-${stamp()}.csv`)}
+              onSaveToDB={() => setShowServerImport(true)}
             />
 
             {workbook.warnings.length > 0 && (
@@ -261,6 +266,14 @@ function App() {
           initialMapping={pendingHeaders.mapping}
           onSave={applyMapping}
           onCancel={() => { setPendingHeaders(null); setPendingBuffer(null) }}
+        />
+      )}
+      {showServerImport && rawFileRef.current && (
+        <ServerImportDialog
+          user={auth.user}
+          fileBuffer={rawFileRef.current.buf}
+          fileName={rawFileRef.current.name}
+          onClose={() => setShowServerImport(false)}
         />
       )}
       {helpTab && <HelpPanel tab={helpTab} onClose={() => setHelpTab(null)} />}

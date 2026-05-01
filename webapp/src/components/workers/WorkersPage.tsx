@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Plus, Search, ChevronLeft, ChevronRight, Loader2, AlertTriangle, X, Trash2 } from 'lucide-react'
+import { Plus, Search, ChevronLeft, ChevronRight, Loader2, AlertTriangle, X, Trash2, Upload } from 'lucide-react'
 import { useWorkers, type Worker } from '../../api/useWorkers'
 import { useWarehouses } from '../../api/usePeriods'
 import type { AuthUser } from '../../auth/useAuth'
+import BulkImportWorkersModal from './BulkImportWorkersModal'
 
 interface Props {
   user: AuthUser
@@ -142,9 +143,10 @@ function WorkerModal({
 
 export default function WorkersPage({ user }: Props) {
   const country = user.country_scope === '*' ? 'TH' : user.country_scope
-  const { workers, total, loading, q, setQ, status, setStatus, page, setPage, createWorker, updateWorker, deleteWorker } = useWorkers(country)
+  const { workers, total, loading, q, setQ, status, setStatus, page, setPage, refresh, createWorker, updateWorker, deleteWorker } = useWorkers(country)
   const [modal, setModal] = useState<{ mode: 'create' | 'edit'; worker: Partial<Worker> | null } | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<Worker | null>(null)
+  const [showBulk, setShowBulk] = useState(false)
 
   const canHr = ['super_admin', 'country_admin', 'hr'].includes(user.role)
   const limit = 50
@@ -163,9 +165,14 @@ export default function WorkersPage({ user }: Props) {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-lg font-semibold text-slate-900">Workers</h2>
         {canHr && (
-          <button className="btn-primary text-sm" onClick={() => setModal({ mode: 'create', worker: null })}>
-            <Plus size={14} /> Add Worker
-          </button>
+          <div className="flex gap-2">
+            <button className="btn-secondary text-sm" onClick={() => setShowBulk(true)}>
+              <Upload size={14} /> Bulk Import
+            </button>
+            <button className="btn-primary text-sm" onClick={() => setModal({ mode: 'create', worker: null })}>
+              <Plus size={14} /> Add Worker
+            </button>
+          </div>
         )}
       </div>
 
@@ -262,6 +269,14 @@ export default function WorkersPage({ user }: Props) {
           country={country}
           onClose={() => setModal(null)}
           onSave={handleSave}
+        />
+      )}
+
+      {showBulk && (
+        <BulkImportWorkersModal
+          country={country}
+          onClose={() => setShowBulk(false)}
+          onSuccess={() => { setShowBulk(false); refresh() }}
         />
       )}
 
