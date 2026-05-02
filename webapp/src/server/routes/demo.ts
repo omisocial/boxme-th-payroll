@@ -412,7 +412,7 @@ demoRouter.post('/seed', ...guard('super_admin'), async (c) => {
     shift_code:      w.shift_code,
     job_type_code:   w.job_type_code,
     status:          'active',
-    created_via:     'api',
+    created_via:     'manual',
     notes:           DEMO_TAG,
     start_date:      '2026-01-01',
   }))
@@ -559,18 +559,16 @@ demoRouter.delete('/reset', ...guard('super_admin'), async (c) => {
     deletedPayroll = count ?? 0
   }
 
-  // ③ Soft-delete attendance records
+  // ③ Hard-delete attendance records (demo data, safe to fully remove)
   const { count: deletedAtt } = await sb.from('attendance_records')
-    .update({ deleted_at: new Date().toISOString() }, { count: 'exact' })
+    .delete({ count: 'exact' })
     .eq('import_batch_id', DEMO_BATCH_ID)
-    .is('deleted_at', null)
 
-  // ④ Soft-delete demo workers
+  // ④ Hard-delete demo workers (frees up (country_code, code) uniqueness for re-seed)
   const { count: deletedWorkers } = await sb.from('workers')
-    .update({ deleted_at: new Date().toISOString(), status: 'resigned' }, { count: 'exact' })
+    .delete({ count: 'exact' })
     .eq('country_code', DEMO_COUNTRY)
     .like('notes', `%${DEMO_TAG}%`)
-    .is('deleted_at', null)
 
   // ⑤ Audit log
   await appendAuditLog(sb, {

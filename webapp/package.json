@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:pages": "wrangler pages dev --compatibility-date=2026-04-30 -- vite",
+    "dev:pages": "wrangler pages dev --proxy 5173 --port 8788 --compatibility-date=2026-04-30",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
