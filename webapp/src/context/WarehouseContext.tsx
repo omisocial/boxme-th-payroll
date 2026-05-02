@@ -25,7 +25,7 @@ const WarehouseContext = createContext<WarehouseContextValue | null>(null)
 const STORAGE_KEY = 'boxme-payroll.currentWarehouseId'
 
 const FALLBACK: WarehouseInfo = {
-  id: 'wh-th-bkk-1', code: 'BKK-1', name: 'Bangkok 1',
+  id: 'a0000000-0000-0000-0000-000000000001', code: 'TH-BKK-1', name: 'Bangkhen Warehouse 1',
   countryCode: 'TH', currency: 'THB', currencySymbol: '฿',
 }
 
