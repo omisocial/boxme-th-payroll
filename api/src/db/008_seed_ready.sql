@@ -1,6 +1,6 @@
 -- 008: Seed data — countries, warehouses, departments, shifts, users
 -- Passwords are replaced by the gen-seed-passwords script before running.
--- Placeholders: $seed$sha256$2dfd95e78e8e2d4545a16b7adea1c8c7c673c537574437f23dde19f687cf4044, $seed$sha256$cf93c7afe535adec3c38656250202aa307aaf507f8d23f43cae114ac6cbfcec1, etc.
+-- Placeholders: $seed$sha256$db2002af6cb6fd9aadfa30c8648c02f49d6e5d379399083878d7c486317a312a, $seed$sha256$39f987b46004775738e7d4656d3d7434f318a833a3fedf61414476f8754123a4, etc.
 
 -- Countries
 INSERT OR IGNORE INTO countries (code, name, currency, timezone, locale, active) VALUES
@@ -76,9 +76,17 @@ INSERT OR IGNORE INTO bank_export_templates (country_code, bank_code, bank_name,
 
 -- Default users (passwords injected by gen-seed-passwords.ts)
 INSERT OR IGNORE INTO users (id, email, password_hash, role, country_scope, force_password_change) VALUES
-  ('usr-admin',       'admin@boxme.tech',         '%%HASH_ADMIN%%',       'super_admin',   '*',  1),
-  ('usr-th-hr',       'th.hr@boxme.tech',          '%%HASH_TH_HR%%',       'hr',            'TH', 1),
-  ('usr-th-sup',      'th.supervisor@boxme.tech',  '$seed$sha256$e544c764066765cfbe49c325e5131f557bb4e5290844f25e7b1bad32fd9ec951',      'supervisor',    'TH', 1),
-  ('usr-vn-hr',       'vn.hr@boxme.tech',          '$seed$sha256$20c09387b6cfec056dc18e9764ec5be0993555af2d040989d23034e5584eb6eb',       'hr',            'VN', 1),
-  ('usr-ph-hr',       'ph.hr@boxme.tech',          '$seed$sha256$9779a09042275698b923a5b494263d365bf00aa0b6adba42c82e93bfbab7d669',       'hr',            'PH', 1),
-  ('usr-viewer',      'viewer@boxme.tech',          '$seed$sha256$814862e433ba58ced50c78f2f11868903c811da38aeeb11526c3503b5a89ad15',      'viewer',        '*',  1);
+  ('usr-admin',       'admin@boxme.tech',         '$seed$sha256$db2002af6cb6fd9aadfa30c8648c02f49d6e5d379399083878d7c486317a312a',       'super_admin',   '*',  1),
+  ('usr-th-hr',       'th.hr@boxme.tech',          '$seed$sha256$39f987b46004775738e7d4656d3d7434f318a833a3fedf61414476f8754123a4',       'hr',            'TH', 1),
+  ('usr-th-sup',      'th.supervisor@boxme.tech',  '$seed$sha256$fb698a22cb8e0f777407331f30c2b9f6c3d40071f2764b289ac00eb79ecdf97c',      'supervisor',    'TH', 1),
+  ('usr-vn-hr',       'vn.hr@boxme.tech',          '$seed$sha256$5e7958c998f8e807abfe79a302f0fbb6b8eceb368155a34d0c55820f7d05322d',       'hr',            'VN', 1),
+  ('usr-ph-hr',       'ph.hr@boxme.tech',          '$seed$sha256$3370e3423ebec57add40948cc3cf6b4548f03af29fa33b643aaa1ab59b809031',       'hr',            'PH', 1),
+  ('usr-viewer',      'viewer@boxme.tech',          '$seed$sha256$7a78a817b8bc0fc0815cdc703b76425c6997b2ba25959e4ef9253aa82118215e',      'viewer',        '*',  1);
+
+-- Force-update password hashes (idempotent)
+UPDATE users SET password_hash='$seed$sha256$db2002af6cb6fd9aadfa30c8648c02f49d6e5d379399083878d7c486317a312a', force_password_change=1 WHERE email='admin@boxme.tech';
+UPDATE users SET password_hash='$seed$sha256$39f987b46004775738e7d4656d3d7434f318a833a3fedf61414476f8754123a4', force_password_change=1 WHERE email='th.hr@boxme.tech';
+UPDATE users SET password_hash='$seed$sha256$fb698a22cb8e0f777407331f30c2b9f6c3d40071f2764b289ac00eb79ecdf97c', force_password_change=1 WHERE email='th.supervisor@boxme.tech';
+UPDATE users SET password_hash='$seed$sha256$5e7958c998f8e807abfe79a302f0fbb6b8eceb368155a34d0c55820f7d05322d', force_password_change=1 WHERE email='vn.hr@boxme.tech';
+UPDATE users SET password_hash='$seed$sha256$3370e3423ebec57add40948cc3cf6b4548f03af29fa33b643aaa1ab59b809031', force_password_change=1 WHERE email='ph.hr@boxme.tech';
+UPDATE users SET password_hash='$seed$sha256$7a78a817b8bc0fc0815cdc703b76425c6997b2ba25959e4ef9253aa82118215e', force_password_change=1 WHERE email='viewer@boxme.tech';
