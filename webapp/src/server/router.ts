@@ -9,6 +9,7 @@ import { payrollRouter } from './routes/payroll'
 import { periodsRouter } from './routes/periods'
 import { adminRouter } from './routes/admin'
 import { settingsRouter } from './routes/settings'
+import { demoRouter } from './routes/demo'
 import type { Env } from './auth/rbac'
 import { getSupabase } from './db/supabase'
 
@@ -37,6 +38,7 @@ app.route('/api/payroll', payrollRouter)
 app.route('/api/periods', periodsRouter)
 app.route('/api/admin', adminRouter)
 app.route('/api/settings', settingsRouter)
+app.route('/api/demo', demoRouter)
 
 // Cron handler — nightly recompute (protected by secret header)
 app.get('/api/_cron/recompute', async (c) => {

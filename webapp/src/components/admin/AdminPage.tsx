@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { Plus, Trash2, Loader2, AlertTriangle, X, RefreshCw } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { Plus, Trash2, Loader2, AlertTriangle, X, RefreshCw, FlaskConical, CheckCircle2, CircleDot, RotateCcw } from 'lucide-react'
 import type { AuthUser } from '../../auth/useAuth'
 
 interface Props {
@@ -342,24 +342,269 @@ function RateConfigsTab({ user }: { user: AuthUser }) {
   )
 }
 
+// ─── Demo Data Tab ────────────────────────────────────────────────────────────
+
+interface DemoStatus {
+  loaded: boolean
+  workerCount: number
+  attendanceCount: number
+  computedCount: number
+}
+
+const AUDIT_SCENARIOS = [
+  { code: 'SC01', label: 'Chấm công bình thường (đúng giờ, đủ ngày)' },
+  { code: 'SC02', label: 'Đến muộn → trừ lương (late deduction)' },
+  { code: 'SC03', label: 'Về sớm → trừ lương (early-out deduction)' },
+  { code: 'SC04', label: 'Tăng ca sau giờ → OT ×1.5' },
+  { code: 'SC05', label: 'Ca đêm qua nửa đêm (NIGHT_A 22:00–07:00, NIGHT_B 20:00–05:00)' },
+  { code: 'SC06', label: 'Nghỉ ốm — ลาป่วย (SICK_LEAVE flag, gross = 0)' },
+  { code: 'SC07', label: 'Nghỉ có phép — ลากิจ (PERSONAL_LEAVE flag, gross = 0)' },
+  { code: 'SC08', label: 'Check-in qua điện thoại — โทรศัพท์เข้าแอป (MANUAL_CHECKIN flag)' },
+  { code: 'SC09', label: 'Sinh viên thực tập — นักศึกษา (INTERN_EXEMPT, không trừ trễ/sớm)' },
+  { code: 'SC10', label: 'Nhân viên vệ sinh — แม่บ้าน (HOUSEKEEPER_EXEMPT, không trừ trễ/sớm)' },
+  { code: 'SC11', label: 'Bồi thường thiệt hại — damage deduction (300/200/100 ฿)' },
+  { code: 'SC12', label: 'Vắng mặt — absent (null checkin + checkout, gross = 0)' },
+  { code: 'SC13', label: 'Ca đêm OT → tính qua nửa đêm + ×1.5 OT pay' },
+]
+
+function DemoTab({ user }: { user: AuthUser }) {
+  const isSuperAdmin = user.role === 'super_admin'
+
+  const [status, setStatus]     = useState<DemoStatus | null>(null)
+  const [loadingStatus, setLS]  = useState(true)
+  const [seeding, setSeeding]   = useState(false)
+  const [resetting, setResetting] = useState(false)
+  const [result, setResult]     = useState<string | null>(null)
+  const [err, setErr]           = useState<string | null>(null)
+  const [confirmAction, setConfirmAction] = useState<'seed' | 'reset' | null>(null)
+  const [showScenarios, setShowScenarios] = useState(false)
+
+  const refreshStatus = useCallback(async () => {
+    setLS(true)
+    try {
+      const res = await fetch('/api/demo/status', { credentials: 'include' })
+      const json = await res.json() as { success: boolean; data?: DemoStatus; message?: string }
+      if (json.success && json.data) setStatus(json.data)
+    } finally {
+      setLS(false)
+    }
+  }, [])
+
+  useEffect(() => { refreshStatus() }, [refreshStatus])
+
+  async function handleSeed() {
+    setConfirmAction(null)
+    setSeeding(true)
+    setErr(null)
+    setResult(null)
+    try {
+      const res  = await fetch('/api/demo/seed', { method: 'POST', credentials: 'include' })
+      const json = await res.json() as { success: boolean; data?: Record<string, unknown>; message?: string }
+      if (!json.success) { setErr(json.message ?? 'Seed failed'); return }
+      const d = json.data!
+      setResult(`✅ Đã tải: ${d['workers']} workers, ${d['attendance']} attendance, ${d['computed']} payroll rows — ${d['periodCovered']}`)
+      refreshStatus()
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setSeeding(false)
+    }
+  }
+
+  async function handleReset() {
+    setConfirmAction(null)
+    setResetting(true)
+    setErr(null)
+    setResult(null)
+    try {
+      const res  = await fetch('/api/demo/reset', { method: 'DELETE', credentials: 'include' })
+      const json = await res.json() as { success: boolean; data?: Record<string, unknown>; message?: string }
+      if (!json.success) { setErr(json.message ?? 'Reset failed'); return }
+      const d = json.data!
+      setResult(`🗑️ Đã xoá: ${d['deletedWorkers']} workers, ${d['deletedAtt']} attendance, ${d['deletedPayroll']} payroll rows`)
+      refreshStatus()
+    } catch (e) {
+      setErr((e as Error).message)
+    } finally {
+      setResetting(false)
+    }
+  }
+
+  const busy = seeding || resetting
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <div className="card p-5">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <FlaskConical size={18} className="text-violet-600" />
+              <h3 className="text-base font-semibold text-slate-900">Demo Data — Boxme Thailand</h3>
+            </div>
+            <p className="text-sm text-slate-500">
+              Nạp 20 workers + ~105 attendance tháng 04/2026, bao phủ 13 kịch bản audit.<br />
+              Sau khi load, kiểm tra Workers tab và Payroll tab để xác minh.
+            </p>
+          </div>
+          <button className="btn-secondary text-xs" onClick={refreshStatus} disabled={loadingStatus}>
+            <RefreshCw size={12} className={loadingStatus ? 'animate-spin' : ''} />
+          </button>
+        </div>
+
+        {/* Status badges */}
+        <div className="mt-4 flex flex-wrap gap-3">
+          {loadingStatus ? (
+            <Loader2 size={16} className="animate-spin text-slate-400" />
+          ) : status ? (
+            <>
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
+                status.loaded ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'
+              }`}>
+                {status.loaded
+                  ? <CheckCircle2 size={12} />
+                  : <CircleDot size={12} />}
+                {status.loaded ? 'Demo data loaded' : 'Not loaded'}
+              </span>
+              {status.loaded && (
+                <>
+                  <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs bg-blue-50 text-blue-700">
+                    Workers: <strong>{status.workerCount}</strong>
+                  </span>
+                  <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs bg-blue-50 text-blue-700">
+                    Attendance: <strong>{status.attendanceCount}</strong>
+                  </span>
+                  <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs bg-blue-50 text-blue-700">
+                    Payroll computed: <strong>{status.computedCount}</strong>
+                  </span>
+                </>
+              )}
+            </>
+          ) : null}
+        </div>
+      </div>
+
+      {/* Scenarios accordion */}
+      <div className="card overflow-hidden">
+        <button
+          className="w-full px-5 py-3 flex items-center justify-between text-sm font-medium text-slate-700 hover:bg-slate-50 transition"
+          onClick={() => setShowScenarios(s => !s)}
+        >
+          <span>📋 13 Kịch bản audit được bao phủ</span>
+          <span className="text-slate-400 text-xs">{showScenarios ? '▲ Ẩn' : '▼ Xem'}</span>
+        </button>
+        {showScenarios && (
+          <div className="border-t border-slate-100 px-5 py-4">
+            <ul className="space-y-1.5">
+              {AUDIT_SCENARIOS.map(s => (
+                <li key={s.code} className="flex items-start gap-2 text-sm text-slate-600">
+                  <span className="shrink-0 mt-0.5 w-12 text-xs font-mono text-violet-600 font-semibold">{s.code}</span>
+                  <span>{s.label}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {/* Result / Error */}
+      {result && (
+        <div className="card p-4 bg-emerald-50 border-emerald-200 text-emerald-800 text-sm flex items-start gap-2">
+          <CheckCircle2 size={15} className="shrink-0 mt-0.5" /> {result}
+        </div>
+      )}
+      {err && (
+        <div className="card p-4 bg-rose-50 border-rose-200 text-rose-700 text-sm flex items-start gap-2">
+          <AlertTriangle size={15} className="shrink-0 mt-0.5" /> {err}
+        </div>
+      )}
+
+      {/* Actions */}
+      {isSuperAdmin ? (
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={() => setConfirmAction('seed')}
+            disabled={busy || status?.loaded}
+            className="btn-primary flex items-center gap-2"
+          >
+            {seeding ? <Loader2 size={15} className="animate-spin" /> : <FlaskConical size={15} />}
+            🚀 Load Demo Data
+          </button>
+          <button
+            onClick={() => setConfirmAction('reset')}
+            disabled={busy || !status?.loaded}
+            className="btn-secondary flex items-center gap-2 text-rose-600 border-rose-200 hover:bg-rose-50"
+          >
+            {resetting ? <Loader2 size={15} className="animate-spin" /> : <RotateCcw size={15} />}
+            🗑️ Reset Demo Data
+          </button>
+        </div>
+      ) : (
+        <p className="text-sm text-slate-400 flex items-center gap-1.5">
+          <AlertTriangle size={13} /> Chỉ Super Admin mới có thể load/reset demo data.
+        </p>
+      )}
+
+      {/* Confirm dialogs */}
+      {confirmAction && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 space-y-4">
+            <h3 className="text-base font-semibold">
+              {confirmAction === 'seed' ? '🚀 Load Demo Data?' : '🗑️ Reset Demo Data?'}
+            </h3>
+            <p className="text-sm text-slate-500">
+              {confirmAction === 'seed'
+                ? 'Sẽ tạo 20 workers + ~105 attendance records + tính lương tự động cho tháng 04/2026.'
+                : 'Sẽ xoá toàn bộ workers, attendance và payroll được đánh dấu [DEMO]. Không thể hoàn tác.'}
+            </p>
+            <div className="flex gap-2">
+              <button className="btn-secondary flex-1" onClick={() => setConfirmAction(null)}>Huỷ</button>
+              <button
+                className={`flex-1 px-4 py-2 rounded-xl text-sm font-medium transition ${
+                  confirmAction === 'seed'
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                    : 'bg-rose-600 hover:bg-rose-700 text-white'
+                }`}
+                onClick={confirmAction === 'seed' ? handleSeed : handleReset}
+              >
+                {confirmAction === 'seed' ? 'Xác nhận Load' : 'Xác nhận Reset'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Main AdminPage ───────────────────────────────────────────────────────────
+
 export default function AdminPage({ user }: Props) {
-  const [tab, setTab] = useState<'users' | 'rates'>('users')
+  const [tab, setTab] = useState<'users' | 'rates' | 'demo'>('users')
+
+  const tabs = [
+    { id: 'users' as const, label: 'Users' },
+    { id: 'rates' as const, label: 'Rate Configs' },
+    { id: 'demo'  as const, label: '🎯 Demo Data' },
+  ]
 
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold text-slate-900">Admin</h2>
       <div className="flex gap-1 border-b border-slate-200">
-        {(['users', 'rates'] as const).map(t => (
+        {tabs.map(t => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${tab === t ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition ${tab === t.id ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
           >
-            {t === 'users' ? 'Users' : 'Rate Configs'}
+            {t.label}
           </button>
         ))}
       </div>
-      {tab === 'users' ? <UsersTab user={user} /> : <RateConfigsTab user={user} />}
+      {tab === 'users' && <UsersTab user={user} />}
+      {tab === 'rates' && <RateConfigsTab user={user} />}
+      {tab === 'demo'  && <DemoTab user={user} />}
     </div>
   )
 }
