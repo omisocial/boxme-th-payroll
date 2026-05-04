@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx'
 import type { PayrollResult, WorkerSummary } from './types'
 
-export function exportDailyXlsx(rows: PayrollResult[], fileName = 'payroll-daily.xlsx') {
+export function exportDailyXlsx(rows: PayrollResult[], fileName = 'payroll-daily.xlsx', currency = 'THB') {
   const data = rows.map(r => ({
     'Sheet': r.sheet,
     'Date': r.workDate,
@@ -16,14 +16,14 @@ export function exportDailyXlsx(rows: PayrollResult[], fileName = 'payroll-daily
     'Late (min)': r.lateMinutesRaw,
     'Late deducted (min)': r.lateMinutesDeducted,
     'Early-out (min)': r.earlyOutMinutes,
-    'Daily Rate (THB)': r.dailyRateThb,
+    [`Daily Rate (${currency})`]: r.dailyRateThb,
     'Late Deduction': r.lateDeductionThb,
     'Early-out Deduction': r.earlyOutDeductionThb,
     'OT Hours': r.otTotalHours,
     'OT Pay': r.otPayThb,
     'Damage': r.damageThb,
     'Other': r.otherDeductionThb,
-    'GROSS WAGE (THB)': r.grossWageThb,
+    [`GROSS WAGE (${currency})`]: r.grossWageThb,
     'Flags': r.flags.join(', '),
     'Manual Note': r.manualNote || '',
   }))
@@ -33,10 +33,12 @@ export function exportDailyXlsx(rows: PayrollResult[], fileName = 'payroll-daily
   XLSX.writeFile(wb, fileName)
 }
 
-export function exportWorkerSummaryXlsx(workers: WorkerSummary[], fileName = 'payroll-workers.xlsx') {
+export function exportWorkerSummaryXlsx(workers: WorkerSummary[], fileName = 'payroll-workers.xlsx', currency = 'THB') {
   const data = workers.map(w => ({
     'Full Name': w.fullName,
     'Nickname': w.nickname || '',
+    'Employee Code': w.employeeCode || '',
+    'National ID': w.nationalId || '',
     'Department': w.department || '',
     'Shifts': w.shifts,
     'Bank Code': w.bankCode || '',
@@ -45,7 +47,7 @@ export function exportWorkerSummaryXlsx(workers: WorkerSummary[], fileName = 'pa
     'Total Early-out': w.totalEarlyOut,
     'Total Damage': w.totalDamage,
     'Total OT': w.totalOt,
-    'TOTAL GROSS (THB)': w.totalGross,
+    [`TOTAL GROSS (${currency})`]: w.totalGross,
   }))
   const ws = XLSX.utils.json_to_sheet(data)
   const wb = XLSX.utils.book_new()
@@ -53,10 +55,10 @@ export function exportWorkerSummaryXlsx(workers: WorkerSummary[], fileName = 'pa
   XLSX.writeFile(wb, fileName)
 }
 
-export function exportBankCsv(workers: WorkerSummary[], bankCode: string, fileName = 'bank-export.csv') {
+export function exportBankCsv(workers: WorkerSummary[], bankCode: string, fileName = 'bank-export.csv', currency = 'THB') {
   // Generic CSV — bank-specific adapters will be added in Phase 1.1
   const filtered = bankCode === 'ALL' ? workers : workers.filter(w => (w.bankCode || '').toUpperCase() === bankCode.toUpperCase())
-  const header = ['No', 'Account Number', 'Account Name', 'Amount THB', 'Bank Code', 'Note']
+  const header = ['No', 'Account Number', 'Account Name', `Amount ${currency}`, 'Bank Code', 'Note']
   const lines = [header.join(',')]
   filtered.forEach((w, i) => {
     if (!w.bankAccount || w.totalGross <= 0) return
@@ -67,7 +69,7 @@ export function exportBankCsv(workers: WorkerSummary[], bankCode: string, fileNa
       `"${safeName}"`,
       w.totalGross.toFixed(2),
       w.bankCode || '',
-      'Boxme TH Payroll'
+      'Payroll'
     ].join(','))
   })
   const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' })

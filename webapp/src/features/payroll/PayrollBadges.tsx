@@ -1,5 +1,6 @@
 import { AlertTriangle, UserPlus, Clock, CheckCircle2 } from 'lucide-react'
 import type { PayrollResult, WorkerSummary, Member } from '../../payroll/types'
+import { useI18n } from '../../i18n/I18n'
 
 interface Props {
   rows: PayrollResult[]
@@ -7,11 +8,13 @@ interface Props {
   members: Member[]
   currencySymbol: string
   onOpenPendingWorkers?: () => void
+  onOpenBulkFix?: (pendingNames: string[]) => void
 }
 
 const OT_OUTLIER_HOURS = 4
 
-export default function PayrollBadges({ rows, workers, members, currencySymbol, onOpenPendingWorkers }: Props) {
+export default function PayrollBadges({ rows, workers, members, currencySymbol, onOpenPendingWorkers, onOpenBulkFix }: Props) {
+  const { t } = useI18n()
   // 1. Workers seen in attendance but not in Members sheet → "pending update" (Phase 2 will sync to DB)
   const memberNames = new Set(members.map(m => m.fullName.trim().toLowerCase()).filter(Boolean))
   const pendingNames = new Set<string>()
@@ -45,21 +48,31 @@ export default function PayrollBadges({ rows, workers, members, currencySymbol, 
           <div className="flex items-center gap-2 text-amber-800 text-sm">
             <UserPlus size={16} className="shrink-0" />
             <span>
-              <strong>{pendingCount}</strong> CTV mới chưa có thông tin — bổ sung trên trang Workers
+              {t('badge.pendingWorkers').replace('{n}', String(pendingCount))}
             </span>
           </div>
-          {onOpenPendingWorkers && (
-            <button onClick={onOpenPendingWorkers} className="btn-secondary text-xs whitespace-nowrap">
-              Mở Workers
-            </button>
-          )}
+          <div className="flex gap-1.5 shrink-0">
+            {onOpenBulkFix && (
+              <button
+                onClick={() => onOpenBulkFix(Array.from(pendingNames))}
+                className="btn-primary text-xs whitespace-nowrap"
+              >
+                {t('badge.bulkUpdate')}
+              </button>
+            )}
+            {onOpenPendingWorkers && (
+              <button onClick={onOpenPendingWorkers} className="btn-secondary text-xs whitespace-nowrap">
+                {t('badge.openWorkers')}
+              </button>
+            )}
+          </div>
         </div>
       )}
       {otOutlierCount > 0 && (
         <div className="card p-3 bg-orange-50/50 border-orange-200 flex items-center gap-2 text-orange-800 text-sm">
           <Clock size={16} className="shrink-0" />
           <span>
-            <strong>{otOutlierCount}</strong> ngày OT &gt; {OT_OUTLIER_HOURS}h — kiểm tra lại
+            {t('badge.otOutlier').replace('{n}', String(otOutlierCount))}
           </span>
         </div>
       )}

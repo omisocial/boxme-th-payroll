@@ -3,7 +3,11 @@ import { Globe, Check } from 'lucide-react'
 import { LANGS } from '../i18n/dict'
 import { useI18n } from '../i18n/I18n'
 
-export default function LangSwitcher() {
+interface Props {
+  inline?: boolean
+}
+
+export default function LangSwitcher({ inline }: Props) {
   const { lang, setLang } = useI18n()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -16,6 +20,28 @@ export default function LangSwitcher() {
     document.addEventListener('mousedown', onClick)
     return () => document.removeEventListener('mousedown', onClick)
   }, [])
+
+  if (inline) {
+    return (
+      <div className="flex items-center gap-1">
+        <Globe size={13} className="text-slate-400 mr-1" />
+        {LANGS.map(l => (
+          <button
+            key={l.code}
+            onClick={() => setLang(l.code)}
+            className={`px-1.5 py-0.5 rounded text-xs font-medium transition-colors ${
+              lang === l.code
+                ? 'bg-blue-100 text-blue-700'
+                : 'text-slate-500 hover:bg-slate-100'
+            }`}
+            title={l.label}
+          >
+            {l.flag}
+          </button>
+        ))}
+      </div>
+    )
+  }
 
   return (
     <div ref={ref} className="relative">

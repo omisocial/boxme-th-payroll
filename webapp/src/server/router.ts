@@ -7,6 +7,8 @@ import { engineConfigRouter } from './routes/engineConfig'
 import { attendanceRouter } from './routes/attendance'
 import { payrollRouter } from './routes/payroll'
 import { periodsRouter } from './routes/periods'
+import { periodLinesRouter } from './routes/periodLines'
+import { reportsRouter } from './routes/reports'
 import { adminRouter } from './routes/admin'
 import { settingsRouter } from './routes/settings'
 import { demoRouter } from './routes/demo'
@@ -36,6 +38,8 @@ app.route('/api/workers', workersRouter)
 app.route('/api/attendance', attendanceRouter)
 app.route('/api/payroll', payrollRouter)
 app.route('/api/periods', periodsRouter)
+app.route('/api/period-lines', periodLinesRouter)
+app.route('/api/reports', reportsRouter)
 app.route('/api/admin', adminRouter)
 app.route('/api/settings', settingsRouter)
 app.route('/api/demo', demoRouter)

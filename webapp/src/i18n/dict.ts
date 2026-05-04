@@ -8,7 +8,7 @@ export const LANGS: { code: Lang; label: string; flag: string }[] = [
 
 export const DICT = {
   // Header
-  'app.title': { en: 'Boxme TH Payroll', vi: 'Boxme TH Payroll', th: 'Boxme TH Payroll' },
+  'app.title': { en: 'Boxme Sessional Payroll', vi: 'Boxme Sessional Payroll', th: 'Boxme Sessional Payroll' },
   'app.subtitle': { en: 'Seasonal MVP · Phase 1', vi: 'MVP thời vụ · Giai đoạn 1', th: 'MVP ตามฤดูกาล · เฟส 1' },
   'app.version': { en: 'v0.1 MVP', vi: 'v0.1 MVP', th: 'v0.1 MVP' },
 
@@ -115,6 +115,8 @@ export const DICT = {
   'map.field.otAfter': { en: 'OT after (hours)', vi: 'OT sau (giờ)', th: 'OT หลัง (ชม.)' },
   'map.field.damage': { en: 'Damage deduction', vi: 'Khấu trừ damage', th: 'หักของเสียหาย' },
   'map.field.other': { en: 'Other deduction', vi: 'Khấu trừ khác', th: 'หักอื่น ๆ' },
+  'map.field.employeeCode': { en: 'Employee Code', vi: 'Mã nhân viên', th: 'รหัสพนักงาน' },
+  'map.field.nationalId': { en: 'National ID', vi: 'CCCD / CMND', th: 'หมายเลขบัตร' },
   'map.resetSaved': { en: 'Reset saved mappings', vi: 'Xoá ánh xạ đã lưu', th: 'รีเซ็ตแมปที่บันทึกไว้' },
 
   // Help
@@ -236,6 +238,8 @@ export const DICT = {
   'nav.workers': { en: 'Workers', vi: 'Nhân viên', th: 'พนักงาน' },
   'nav.admin': { en: 'Admin', vi: 'Quản trị', th: 'ผู้ดูแล' },
   'nav.settings': { en: 'Settings', vi: 'Cài đặt', th: 'ตั้งค่า' },
+  'nav.guide': { en: 'Full User Guide', vi: 'Hướng dẫn đầy đủ', th: 'คู่มือฉบับสมบูรณ์' },
+  'guide.toc': { en: 'Contents', vi: 'Mục lục', th: 'สารบัญ' },
 
   // Workers page
   'workers.title': { en: 'Workers', vi: 'Nhân viên', th: 'พนักงาน' },
@@ -268,6 +272,8 @@ export const DICT = {
   'workers.form.bankAccount': { en: 'Bank Account', vi: 'Số tài khoản', th: 'หมายเลขบัญชี' },
   'workers.form.phone': { en: 'Phone', vi: 'Điện thoại', th: 'โทรศัพท์' },
   'workers.form.startDate': { en: 'Start Date', vi: 'Ngày bắt đầu', th: 'วันที่เริ่มงาน' },
+  'workers.form.employeeCode': { en: 'Boxme Employee Code', vi: 'Mã NV Boxme', th: 'รหัสพนักงาน Boxme' },
+  'workers.form.nationalId': { en: 'National ID / CCCD', vi: 'CCCD / CMND', th: 'หมายเลขบัตรประชาชน' },
 
   // Payroll badges (post-compute warnings)
   'badge.pendingWorkers': { en: '{n} new workers need info', vi: '{n} CTV mới chưa có thông tin', th: '{n} พนักงานใหม่ยังไม่มีข้อมูล' },
@@ -278,6 +284,142 @@ export const DICT = {
   // Warehouse switcher
   'warehouse.label': { en: 'Warehouse', vi: 'Kho', th: 'คลังสินค้า' },
   'warehouse.switch': { en: 'Switch warehouse', vi: 'Đổi kho', th: 'เปลี่ยนคลัง' },
+
+  // Payroll computation flags — human-readable labels in all 3 languages
+  'flag.NO_CHECKIN': { en: 'Missing check-in', vi: 'Thiếu giờ vào', th: 'ไม่มีเวลาเข้างาน' },
+  'flag.NO_CHECKOUT': { en: 'Missing check-out', vi: 'Thiếu giờ ra', th: 'ไม่มีเวลาออกงาน' },
+  'flag.ABSENT': { en: 'Absent', vi: 'Vắng mặt', th: 'ขาดงาน' },
+  'flag.UNKNOWN_SHIFT': { en: 'Shift not recognized', vi: 'Không nhận dạng được ca', th: 'ไม่รู้จักรหัสกะ' },
+  'flag.NEGATIVE_FLOORED': { en: 'Net wage floored to 0', vi: 'Lương âm, làm tròn về 0', th: 'ค่าแรงติดลบ ปรับเป็น 0' },
+  'flag.DAMAGE_OFFSETS_WAGE': { en: 'Damage exceeds wage', vi: 'Khấu trừ vượt lương', th: 'ค่าเสียหายเกินค่าแรง' },
+  'flag.INTERN_EXEMPT': { en: 'Intern (exempt)', vi: 'Thực tập (miễn trừ)', th: 'นักศึกษา (ยกเว้น)' },
+  'flag.HOUSEKEEPER_EXEMPT': { en: 'Housekeeper (exempt)', vi: 'Vệ sinh (miễn trừ)', th: 'แม่บ้าน (ยกเว้น)' },
+  'flag.MANUAL_CHECKIN': { en: 'Manual check-in', vi: 'Chấm công thủ công', th: 'เช็คอินแบบแมนนวล' },
+  'flag.SICK_LEAVE': { en: 'Sick leave', vi: 'Nghỉ bệnh', th: 'ลาป่วย' },
+  'flag.PERSONAL_LEAVE': { en: 'Personal leave', vi: 'Nghỉ phép', th: 'ลากิจ' },
+
+  // Workflow stepper
+  'step.import':    { en: 'Import',    vi: 'Import',     th: 'นำเข้า' },
+  'step.workers':   { en: 'Workers',   vi: 'Nhân viên',  th: 'พนักงาน' },
+  'step.calculate': { en: 'Calculate', vi: 'Tính lương', th: 'คำนวณ' },
+  'step.pay':       { en: 'Pay',       vi: 'Thanh toán', th: 'จ่าย' },
+  'step.report':    { en: 'Report',    vi: 'Báo cáo',    th: 'รายงาน' },
+
+  // Validation bar
+  'validation.apply':      { en: 'Apply', vi: 'Áp dụng', th: 'ใช้งาน' },
+  'validation.formatHint': { en: 'Format: 08:30 - 17:30 · Results recomputed instantly', vi: 'Định dạng: 08:30 - 17:30 · Kết quả tính lại ngay', th: 'รูปแบบ: 08:30 - 17:30 · ผลลัพธ์คำนวณใหม่ทันที' },
+  'validation.quickFix':   { en: 'Quick fix: apply shift to {count} unrecognized rows', vi: 'Sửa nhanh: áp ca cho {count} hàng chưa nhận diện', th: 'แก้ไขด่วน: กำหนดกะให้ {count} แถวที่ไม่รู้จัก' },
+
+  // Common extras
+  'common.back': { en: 'Back', vi: 'Quay lại', th: 'ย้อนกลับ' },
+
+  // Server import dialog
+  'import.title':           { en: 'Save Attendance to DB',             vi: 'Lưu chấm công vào cơ sở dữ liệu',  th: 'บันทึกการมาปฏิบัติงานลงฐานข้อมูล' },
+  'import.warehouseLabel':  { en: 'Warehouse *',                       vi: 'Kho *',                              th: 'คลังสินค้า *' },
+  'import.yearMonthLabel':  { en: 'Year-Month *',                      vi: 'Năm-Tháng *',                        th: 'ปี-เดือน *' },
+  'import.selectWarehouse': { en: 'Select warehouse',                  vi: 'Chọn kho',                           th: 'เลือกคลัง' },
+  'import.uploadPreview':   { en: 'Upload & Preview',                  vi: 'Tải lên & Xem trước',                th: 'อัปโหลดและดูตัวอย่าง' },
+  'import.uploading':       { en: 'Uploading…',                        vi: 'Đang tải lên…',                      th: 'กำลังอัปโหลด…' },
+  'import.preview':         { en: 'Preview',                           vi: 'Xem trước',                          th: 'ดูตัวอย่าง' },
+  'import.colSheet':        { en: 'Sheet',                             vi: 'Sheet',                              th: 'ชีท' },
+  'import.colDate':         { en: 'Date',                              vi: 'Ngày',                               th: 'วันที่' },
+  'import.colName':         { en: 'Name',                              vi: 'Tên',                                th: 'ชื่อ' },
+  'import.colInOut':        { en: 'In / Out',                          vi: 'Vào / Ra',                           th: 'เข้า / ออก' },
+  'import.moreRows':        { en: '+ {count} more rows not shown',     vi: '+ {count} hàng khác không hiển thị', th: '+ {count} แถวเพิ่มเติมไม่แสดง' },
+  'import.commit':          { en: 'Commit {count} rows',               vi: 'Xác nhận {count} hàng',              th: 'ยืนยัน {count} แถว' },
+  'import.saving':          { en: 'Saving attendance records…',        vi: 'Đang lưu hồ sơ chấm công…',          th: 'กำลังบันทึก…' },
+  'import.complete':        { en: 'Import complete',                   vi: 'Nhập hoàn tất',                      th: 'นำเข้าเสร็จสิ้น' },
+  'import.imported':        { en: 'Imported',                          vi: 'Đã nhập',                            th: 'นำเข้าแล้ว' },
+  'import.skipped':         { en: 'Skipped',                           vi: 'Bỏ qua',                             th: 'ข้ามไป' },
+  'import.validationSummary': { en: 'Validation Summary', vi: 'Tóm tắt xác thực', th: 'สรุปการตรวจสอบ' },
+  'import.rowsWillImport':  { en: '{n} rows will be imported',          vi: '{n} hàng sẽ được nhập',              th: '{n} แถวจะถูกนำเข้า' },
+  'import.missingCheckin':  { en: '~{n} rows missing check-in (will be flagged)', vi: '~{n} hàng thiếu check-in (sẽ được đánh dấu)', th: '~{n} แถวขาด check-in (จะถูกทำเครื่องหมาย)' },
+  'import.missingCheckout': { en: '~{n} rows missing check-out (will be flagged)', vi: '~{n} hàng thiếu check-out (sẽ được đánh dấu)', th: '~{n} แถวขาด check-out (จะถูกทำเครื่องหมาย)' },
+  'import.missingShift':    { en: '~{n} rows with unrecognized shift (will be flagged)', vi: '~{n} hàng có ca không nhận diện (sẽ được đánh dấu)', th: '~{n} แถวที่ไม่รู้จักกะ (จะถูกทำเครื่องหมาย)' },
+
+  // Payroll badge extras
+  'badge.bulkUpdate': { en: 'Bulk update', vi: 'Cập nhật hàng loạt', th: 'อัปเดตเป็นกลุ่ม' },
+
+  // Payments page
+  'pay.title':        { en: 'Payments',          vi: 'Thanh toán',            th: 'การชำระเงิน' },
+  'pay.loading':      { en: 'Loading periods…',  vi: 'Đang tải kỳ lương…',    th: 'กำลังโหลด…' },
+  'pay.noPeriod':     { en: 'No payroll period', vi: 'Chưa có kỳ lương',       th: 'ยังไม่มีรอบเงินเดือน' },
+  'pay.noPeriodHint': { en: 'Import a timesheet and run payroll first.', vi: 'Hãy import file chấm công và chạy tính lương trước.', th: 'กรุณานำเข้า timesheet และคำนวณเงินเดือนก่อน' },
+  'pay.openWarning':  { en: 'Open period — may be recomputed', vi: 'Period đang mở — có thể bị recompute', th: 'รอบเปิด — อาจคำนวณใหม่' },
+  'pay.statusAll':    { en: 'All statuses',      vi: 'Tất cả trạng thái',      th: 'ทุกสถานะ' },
+  'pay.statusPaid':   { en: 'Paid',              vi: 'Đã thanh toán',           th: 'ชำระแล้ว' },
+  'pay.statusUnpaid': { en: 'Unpaid',            vi: 'Chưa thanh toán',         th: 'ยังไม่ชำระ' },
+  'pay.typeAll':      { en: 'All types',         vi: 'Mọi loại',               th: 'ทุกประเภท' },
+  'pay.typeSeasonal': { en: 'Seasonal',          vi: 'Thời vụ',                th: 'ตามฤดูกาล' },
+  'pay.typeRegular':  { en: 'Regular',           vi: 'Chính thức',             th: 'ประจำ' },
+  'pay.search':       { en: 'Search by name…',   vi: 'Tìm theo tên…',          th: 'ค้นหาตามชื่อ…' },
+  'pay.selected':     { en: '{n} selected',      vi: '{n} đã chọn',            th: 'เลือก {n} รายการ' },
+  'pay.markPaid':     { en: 'Mark as paid',      vi: 'Đánh dấu đã thanh toán', th: 'ทำเครื่องหมายชำระแล้ว' },
+  'pay.markUnpaid':   { en: 'Mark as unpaid',    vi: 'Đánh dấu chưa thanh toán', th: 'ทำเครื่องหมายยังไม่ชำระ' },
+  'pay.deselect':     { en: 'Deselect',          vi: 'Bỏ chọn',               th: 'ยกเลิกการเลือก' },
+  'pay.colGross':     { en: 'Gross',             vi: 'Gross',                  th: 'รวมก่อนหัก' },
+  'pay.colDeduct':    { en: 'Deductions',        vi: 'Khấu trừ',              th: 'ยอดหัก' },
+  'pay.colStatus':    { en: 'Status',            vi: 'Trạng thái',             th: 'สถานะ' },
+  'pay.noRows':       { en: 'No matching rows.', vi: 'Không có dòng phù hợp.', th: 'ไม่พบรายการ' },
+  'pay.togglePaid':   { en: 'Mark paid',         vi: 'Đánh dấu TT',           th: 'ทำเครื่องหมายจ่าย' },
+  'pay.toggleUnpaid': { en: 'Mark unpaid',       vi: 'Hoàn tác',              th: 'ยกเลิกการจ่าย' },
+  'pay.colType':      { en: 'Type',              vi: 'Loại',                  th: 'ประเภท' },
+  'pay.colName':      { en: 'Name',              vi: 'Họ tên',                th: 'ชื่อ' },
+  'pay.colShifts':    { en: 'Shifts',            vi: 'Ca',                    th: 'กะ' },
+  'pay.colNet':       { en: 'Net',               vi: 'Net',                   th: 'สุทธิ' },
+  'pay.colAction':    { en: 'Actions',           vi: 'Hành động',             th: 'การดำเนินการ' },
+  'pay.statCount':    { en: 'Workers',           vi: 'Số người',              th: 'พนักงาน' },
+  'pay.statNet':      { en: 'Total net',         vi: 'Net tổng',              th: 'สุทธิรวม' },
+  'pay.statPaid':     { en: 'Paid',              vi: 'Đã thanh toán',         th: 'ชำระแล้ว' },
+  'pay.statUnpaid':   { en: 'Unpaid',            vi: 'Chưa thanh toán',       th: 'ยังไม่ชำระ' },
+
+  // Monthly report page
+  'report.title':          { en: 'Monthly Report',        vi: 'Báo cáo tháng',              th: 'รายงานรายเดือน' },
+  'report.allWarehouses':  { en: 'All warehouses',        vi: 'Tất cả kho',                 th: 'ทุกคลัง' },
+  'report.loading':        { en: 'Loading report…',       vi: 'Đang tải báo cáo…',          th: 'กำลังโหลดรายงาน…' },
+  'report.noData':         { en: 'No data for {month}',   vi: 'Chưa có dữ liệu cho {month}', th: 'ไม่มีข้อมูลสำหรับ {month}' },
+  'report.noDataHint':     { en: 'At least one completed payroll period is needed.', vi: 'Cần có ít nhất 1 kỳ lương đã được tính lương.', th: 'ต้องมีรอบเงินเดือนที่เสร็จสมบูรณ์อย่างน้อย 1 รอบ' },
+  'report.kpiNet':         { en: 'Total net',             vi: 'Net tổng',                   th: 'สุทธิรวม' },
+  'report.kpiWorkers':     { en: 'Workers',               vi: 'Số CTV',                     th: 'พนักงาน' },
+  'report.kpiShifts':      { en: 'Shifts',                vi: 'Ca công',                    th: 'กะ' },
+  'report.kpiOt':          { en: 'Total OT',              vi: 'OT tổng',                    th: 'OT รวม' },
+  'report.kpiDeduct':      { en: 'Deductions',            vi: 'Khấu trừ',                   th: 'ยอดหัก' },
+  'report.kpiPaidRatio':   { en: 'Paid / Unpaid',         vi: 'TT / Chưa',                  th: 'จ่าย / ค้าง' },
+  'report.byDept':         { en: 'Net by department',     vi: 'Net theo phòng ban',          th: 'สุทธิตามแผนก' },
+  'report.noDeptData':     { en: 'No department data.',   vi: 'Không có dữ liệu phòng ban.', th: 'ไม่มีข้อมูลแผนก' },
+  'report.periodsInMonth': { en: 'Periods in month ({n})', vi: 'Kỳ lương trong tháng ({n})', th: 'รอบในเดือน ({n})' },
+
+  // Bulk fix workers modal
+  'bulk.title':      { en: 'Add new workers', vi: 'Bổ sung CTV mới', th: 'เพิ่มพนักงานใหม่' },
+  'bulk.desc':       { en: '{n} people detected in timesheet but have no profile. Fill in the minimum info and save.', vi: '{n} người được phát hiện trong file chấm công nhưng chưa có hồ sơ. Điền thông tin tối thiểu rồi lưu.', th: '{n} คนพบในไฟล์ timesheet แต่ยังไม่มีข้อมูล กรุณากรอกข้อมูลขั้นต่ำแล้วบันทึก' },
+  'bulk.bulkDefault': { en: 'Bulk default:', vi: 'Bulk default:', th: 'ค่าเริ่มต้นกลุ่ม:' },
+  'bulk.applyToAll': { en: 'Apply to all',   vi: 'Áp dụng cho tất cả', th: 'ใช้กับทั้งหมด' },
+  'bulk.unsaved':    { en: '{n} unsaved',    vi: '{n} người chưa lưu', th: '{n} รายการยังไม่บันทึก' },
+  'bulk.allSaved':   { en: 'All saved',      vi: 'Đã lưu tất cả',     th: 'บันทึกทั้งหมดแล้ว' },
+  'bulk.saving':     { en: 'Saving…',        vi: 'Đang lưu…',          th: 'กำลังบันทึก…' },
+  'bulk.save':       { en: 'Save',           vi: 'Lưu',                th: 'บันทึก' },
+  'bulk.saveN':      { en: 'Save {n}',       vi: 'Lưu {n} người',      th: 'บันทึก {n} คน' },
+  'bulk.colNickname': { en: 'Nickname',      vi: 'Tên gọi',            th: 'ชื่อเล่น' },
+  'bulk.warehouseLabel': { en: 'Warehouse:', vi: 'Kho:',               th: 'คลัง:' },
+
+  // Onboarding wizard
+  'onboard.title':       { en: 'Welcome to Boxme Sessional Payroll', vi: 'Chào mừng đến Boxme Sessional Payroll', th: 'ยินดีต้อนรับสู่ Boxme Sessional Payroll' },
+  'onboard.desc':        { en: 'Payroll system for seasonal workers. Import daily timesheets, calculate wages, and export bank files.', vi: 'Hệ thống tính lương cho CTV thời vụ. Mỗi ngày import file chấm công, hệ thống tính lương và xuất file ngân hàng.', th: 'ระบบคำนวณค่าจ้างพนักงานตามฤดูกาล นำเข้า timesheet รายวัน คำนวณค่าจ้าง และส่งออกไฟล์ธนาคาร' },
+  'onboard.step1.title': { en: 'Step 1 — Daily Import',    vi: 'Bước 1 — Daily Import',    th: 'ขั้นที่ 1 — นำเข้ารายวัน' },
+  'onboard.step1.desc':  { en: 'Upload Excel timesheet daily. System parses, maps existing workers, and flags new unknown workers.', vi: 'Hằng ngày upload file Excel timesheet. Hệ thống tự parse, map CTV đã có, và cảnh báo CTV mới chưa có hồ sơ.', th: 'อัปโหลดไฟล์ Excel timesheet รายวัน ระบบอ่าน จับคู่พนักงาน และแจ้งเตือนพนักงานใหม่ที่ไม่รู้จัก' },
+  'onboard.step2.title': { en: 'Step 2 — Workers',         vi: 'Bước 2 — Workers',         th: 'ขั้นที่ 2 — พนักงาน' },
+  'onboard.step2.desc':  { en: 'Add new worker info (bank, dept) via bulk modal or individually. System recalculates wages.', vi: 'Bổ sung thông tin CTV mới (bank, dept) qua bulk modal hoặc CRUD từng người. Hệ thống tính lương lại.', th: 'เพิ่มข้อมูลพนักงานใหม่ (ธนาคาร, แผนก) ผ่าน bulk modal หรือทีละคน ระบบคำนวณใหม่อัตโนมัติ' },
+  'onboard.step3.title': { en: 'Step 3 — Calculate & Pay', vi: 'Bước 3 — Calculate & Pay', th: 'ขั้นที่ 3 — คำนวณและจ่าย' },
+  'onboard.step3.desc':  { en: 'After calculation, go to Pay tab to mark payments individually or in bulk.', vi: 'Sau khi tính xong, sang tab Pay để đánh dấu đã thanh toán theo từng người hoặc bulk select.', th: 'หลังคำนวณเสร็จ ไปที่แท็บ Pay เพื่อทำเครื่องหมายการชำระทีละคนหรือเป็นกลุ่ม' },
+  'onboard.step4.title': { en: 'Step 4 — Monthly Report',  vi: 'Bước 4 — Monthly Report',  th: 'ขั้นที่ 4 — รายงานรายเดือน' },
+  'onboard.step4.desc':  { en: 'At month-end, view KPI summary, dept breakdown, and bank export audit log.', vi: 'Cuối tháng xem báo cáo tổng hợp KPI, breakdown theo dept, và audit log các bank export.', th: 'ปลายเดือนดูสรุป KPI, รายละเอียดแผนก, และ audit log การส่งออกธนาคาร' },
+  'onboard.skip':        { en: 'Skip',        vi: 'Bỏ qua',   th: 'ข้าม' },
+  'onboard.back':        { en: 'Back',        vi: 'Trở lại',  th: 'ย้อนกลับ' },
+  'onboard.start':       { en: 'Get started', vi: 'Bắt đầu',  th: 'เริ่มใช้งาน' },
+  'onboard.next':        { en: 'Next',        vi: 'Tiếp',     th: 'ถัดไป' },
+
+  // Toast messages
+  'toast.workersCreated': { en: 'Created {n} new workers — re-upload file to recalculate if needed', vi: 'Đã tạo {n} CTV mới — re-upload file để tính lương lại nếu cần', th: 'สร้าง {n} พนักงานใหม่ — อัปโหลดไฟล์อีกครั้งเพื่อคำนวณใหม่หากต้องการ' },
 } as const
 
 export type DictKey = keyof typeof DICT

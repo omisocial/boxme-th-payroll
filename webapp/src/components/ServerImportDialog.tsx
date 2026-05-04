@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { X, Loader2, CheckCircle2, AlertTriangle, Database } from 'lucide-react'
 import { useWarehouses } from '../api/usePeriods'
 import type { AuthUser } from '../auth/useAuth'
+import { useI18n } from '../i18n/I18n'
 
 interface Props {
   user: AuthUser
@@ -17,6 +18,8 @@ interface PreviewRow {
   fullName: string
   checkin?: string
   checkout?: string
+  shiftCode?: string
+  note?: string
 }
 
 interface ImportPreview {
@@ -27,7 +30,61 @@ interface ImportPreview {
 
 type Stage = 'setup' | 'uploading' | 'preview' | 'committing' | 'done'
 
+function ValidationSummary({ rows, totalRows }: { rows: PreviewRow[]; totalRows: number }) {
+  const { t } = useI18n()
+  const counts = useMemo(() => {
+    let missingCheckin = 0, missingCheckout = 0, missingShift = 0
+    for (const r of rows) {
+      if (!r.checkin) missingCheckin++
+      if (!r.checkout) missingCheckout++
+      if (!r.shiftCode) missingShift++
+    }
+    // Extrapolate to totalRows if we only have a sample
+    const factor = rows.length > 0 ? totalRows / rows.length : 1
+    return {
+      ready: totalRows - Math.round((missingCheckin || missingCheckout || missingShift ? 1 : 0) * factor),
+      missingCheckin: Math.round(missingCheckin * factor),
+      missingCheckout: Math.round(missingCheckout * factor),
+      missingShift: Math.round(missingShift * factor),
+    }
+  }, [rows, totalRows])
+
+  const hasWarnings = counts.missingCheckin > 0 || counts.missingCheckout > 0 || counts.missingShift > 0
+
+  return (
+    <div className={`rounded-xl border p-3 text-xs space-y-1.5 ${hasWarnings ? 'border-amber-200 bg-amber-50/60' : 'border-emerald-200 bg-emerald-50/60'}`}>
+      <div className="flex items-center gap-1.5 font-medium text-slate-700">
+        {hasWarnings ? <AlertTriangle size={12} className="text-amber-500" /> : <CheckCircle2 size={12} className="text-emerald-500" />}
+        {t('import.validationSummary')}
+      </div>
+      <div className="flex items-center gap-1.5 text-emerald-700">
+        <CheckCircle2 size={10} />
+        <span>{t('import.rowsWillImport').replace('{n}', String(totalRows))}</span>
+      </div>
+      {counts.missingCheckin > 0 && (
+        <div className="flex items-center gap-1.5 text-amber-700">
+          <AlertTriangle size={10} />
+          <span>{t('import.missingCheckin').replace('{n}', String(counts.missingCheckin))}</span>
+        </div>
+      )}
+      {counts.missingCheckout > 0 && (
+        <div className="flex items-center gap-1.5 text-amber-700">
+          <AlertTriangle size={10} />
+          <span>{t('import.missingCheckout').replace('{n}', String(counts.missingCheckout))}</span>
+        </div>
+      )}
+      {counts.missingShift > 0 && (
+        <div className="flex items-center gap-1.5 text-amber-700">
+          <AlertTriangle size={10} />
+          <span>{t('import.missingShift').replace('{n}', String(counts.missingShift))}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function ServerImportDialog({ user, fileBuffer, fileName, onClose }: Props) {
+  const { t } = useI18n()
   const country = user.country_scope === '*' ? 'TH' : user.country_scope
   const warehouses = useWarehouses(country)
 
@@ -94,7 +151,7 @@ export default function ServerImportDialog({ user, fileBuffer, fileName, onClose
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Database size={16} className="text-blue-600" />
-            <h2 className="text-base font-semibold text-slate-900">Save Attendance to DB</h2>
+            <h2 className="text-base font-semibold text-slate-900">{t('import.title')}</h2>
           </div>
           <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg"><X size={16} /></button>
         </div>
@@ -105,19 +162,19 @@ export default function ServerImportDialog({ user, fileBuffer, fileName, onClose
         {(stage === 'setup' || stage === 'uploading') && (
           <div className="space-y-4">
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Warehouse *</label>
+              <label className="block text-xs text-slate-500 mb-1">{t('import.warehouseLabel')}</label>
               <select
                 className="input w-full"
                 value={warehouseId}
                 onChange={e => setWarehouseId(e.target.value)}
                 disabled={stage === 'uploading'}
               >
-                <option value="">Select warehouse</option>
+                <option value="">{t('import.selectWarehouse')}</option>
                 {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-xs text-slate-500 mb-1">Year-Month *</label>
+              <label className="block text-xs text-slate-500 mb-1">{t('import.yearMonthLabel')}</label>
               <input
                 type="month"
                 className="input w-full"
@@ -132,15 +189,15 @@ export default function ServerImportDialog({ user, fileBuffer, fileName, onClose
               </p>
             )}
             <div className="flex gap-2 pt-1">
-              <button className="btn-secondary flex-1" onClick={onClose} disabled={stage === 'uploading'}>Cancel</button>
+              <button className="btn-secondary flex-1" onClick={onClose} disabled={stage === 'uploading'}>{t('common.cancel')}</button>
               <button
                 className="btn-primary flex-1 disabled:opacity-50"
                 onClick={handleUpload}
                 disabled={!warehouseId || stage === 'uploading'}
               >
                 {stage === 'uploading'
-                  ? <><Loader2 size={14} className="animate-spin" /> Uploading…</>
-                  : 'Upload & Preview'}
+                  ? <><Loader2 size={14} className="animate-spin" /> {t('import.uploading')}</>
+                  : t('import.uploadPreview')}
               </button>
             </div>
           </div>
@@ -150,17 +207,17 @@ export default function ServerImportDialog({ user, fileBuffer, fileName, onClose
         {stage === 'preview' && preview && (
           <div className="space-y-3">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-slate-700 font-medium">Preview</span>
+              <span className="text-slate-700 font-medium">{t('import.preview')}</span>
               <span className="text-slate-500 text-xs">{preview.totalRows} rows total</span>
             </div>
             <div className="overflow-x-auto rounded-lg border border-slate-200">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wide">
-                    <th className="px-3 py-2 text-left">Sheet</th>
-                    <th className="px-3 py-2 text-left">Date</th>
-                    <th className="px-3 py-2 text-left">Name</th>
-                    <th className="px-3 py-2 text-left">In / Out</th>
+                    <th className="px-3 py-2 text-left">{t('import.colSheet')}</th>
+                    <th className="px-3 py-2 text-left">{t('import.colDate')}</th>
+                    <th className="px-3 py-2 text-left">{t('import.colName')}</th>
+                    <th className="px-3 py-2 text-left">{t('import.colInOut')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -176,19 +233,22 @@ export default function ServerImportDialog({ user, fileBuffer, fileName, onClose
               </table>
               {preview.totalRows > 5 && (
                 <div className="px-3 py-2 text-xs text-slate-400 border-t border-slate-100">
-                  + {preview.totalRows - 5} more rows not shown
+                  {t('import.moreRows').replace('{count}', String(preview.totalRows - 5))}
                 </div>
               )}
             </div>
+
+            <ValidationSummary rows={preview.rows} totalRows={preview.totalRows} />
+
             {err && (
               <p className="text-xs text-rose-600 flex items-center gap-1">
                 <AlertTriangle size={12} /> {err}
               </p>
             )}
             <div className="flex gap-2 pt-1">
-              <button className="btn-secondary flex-1" onClick={() => setStage('setup')}>Back</button>
+              <button className="btn-secondary flex-1" onClick={() => setStage('setup')}>{t('common.back')}</button>
               <button className="btn-primary flex-1" onClick={handleCommit}>
-                Commit {preview.totalRows} rows
+                {t('import.commit').replace('{count}', String(preview.totalRows))}
               </button>
             </div>
           </div>
@@ -198,7 +258,7 @@ export default function ServerImportDialog({ user, fileBuffer, fileName, onClose
         {stage === 'committing' && (
           <div className="flex flex-col items-center gap-3 py-6">
             <Loader2 size={28} className="animate-spin text-blue-500" />
-            <p className="text-sm text-slate-600">Saving attendance records…</p>
+            <p className="text-sm text-slate-600">{t('import.saving')}</p>
           </div>
         )}
 
@@ -207,15 +267,15 @@ export default function ServerImportDialog({ user, fileBuffer, fileName, onClose
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-emerald-700">
               <CheckCircle2 size={18} />
-              <span className="font-medium text-sm">Import complete</span>
+              <span className="font-medium text-sm">{t('import.complete')}</span>
             </div>
             <div className="bg-slate-50 rounded-xl p-4 text-sm space-y-1">
               <div className="flex justify-between">
-                <span className="text-slate-600">Imported</span>
+                <span className="text-slate-600">{t('import.imported')}</span>
                 <span className="font-semibold text-slate-900">{result.imported}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-600">Skipped</span>
+                <span className="text-slate-600">{t('import.skipped')}</span>
                 <span className="font-semibold text-slate-900">{result.skipped}</span>
               </div>
             </div>
@@ -224,7 +284,7 @@ export default function ServerImportDialog({ user, fileBuffer, fileName, onClose
                 {result.errors.map((e, i) => <div key={i}>{e}</div>)}
               </div>
             )}
-            <button className="btn-primary w-full" onClick={onClose}>Close</button>
+            <button className="btn-primary w-full" onClick={onClose}>{t('common.close')}</button>
           </div>
         )}
       </div>

@@ -44,6 +44,8 @@ export function summarizeWorkers(
         bankAccount: m?.bankAccount,
         bankCode: m?.bankCode,
         department: m?.department || r.note,
+        employeeCode: m?.employeeCode,
+        nationalId: m?.nationalId,
         shifts: 0,
         totalGross: 0,
         totalOt: 0,

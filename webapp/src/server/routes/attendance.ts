@@ -155,7 +155,7 @@ attendanceRouter.post('/import', ...guard('hr'), async (c) => {
     console.warn('[import] Storage upload failed (bucket may not exist yet)')
   }
 
-  // Parse Excel — mirrors frontend parser.ts logic
+  // Parse Excel — mirrors frontend parser.ts logic (including dual-format header detection)
   const { read, utils } = await import('xlsx')
   const wb = read(new Uint8Array(bytes), { type: 'array', cellDates: false })
 
@@ -163,8 +163,46 @@ attendanceRouter.post('/import', ...guard('hr'), async (c) => {
   const warnings: string[] = []
   const yearMonth = c.req.query('yearMonth') // optional "YYYY-MM" for date fallback
 
-  // Default column indices matching DEFAULT_MAPPING in mapping.ts
-  const COL = { fullName: 1, checkin: 2, checkout: 3, note: 4, nickname: 5, shiftCode: 17 }
+  // Fallback column indices (DEFAULT_MAPPING for legacy Boxme TH template)
+  const DEFAULT_COL = { fullName: 1, checkin: 2, checkout: 3, note: 4, nickname: 5, shiftCode: 17 }
+
+  // Key regex patterns shared with frontend mapping.ts
+  const HEADER_PATTERNS = {
+    fullName:  [/ชื่อ.?(นาม)?สกุล/i, /full.?name/i, /họ ?(và )?tên/i],
+    checkin:   [/check.?in/i, /เช็คอิน/i, /เข้างาน/i, /giờ.?vào/i],
+    checkout:  [/check.?out/i, /เช็คเอ้า/i, /เลิกงาน/i, /giờ.?ra/i],
+    note:      [/^note$/i, /^department/i, /แผนก/i, /สังกัด/i],
+    nickname:  [/ชื่อเล่น/i, /nick.?name/i, /tên gọi/i],
+    shiftCode: [/กะ(การ)?(ทำงาน)?/i, /^shift/i],
+  }
+
+  // Detect header row: prefer row 0 (new template), fall back to row 7 (legacy)
+  const detectHeaderRow = (rows: unknown[][]): number => {
+    const keyCheck = (row: unknown[]) =>
+      (row || []).some(cell =>
+        typeof cell === 'string' &&
+        HEADER_PATTERNS.fullName.concat(HEADER_PATTERNS.checkin).some(p => p.test(cell))
+      )
+    if (rows.length > 0 && keyCheck(rows[0] as unknown[])) return 0
+    if (rows.length > 7 && keyCheck(rows[7] as unknown[])) return 7
+    return 7 // legacy default
+  }
+
+  // Build column index map from detected header row; fall back to defaults for undetected fields
+  const buildColMap = (headers: string[]) => {
+    const find = (patterns: RegExp[]) => {
+      const idx = headers.findIndex(h => h && patterns.some(p => p.test(h)))
+      return idx >= 0 ? idx : -1
+    }
+    return {
+      fullName:  find(HEADER_PATTERNS.fullName)  >= 0 ? find(HEADER_PATTERNS.fullName)  : DEFAULT_COL.fullName,
+      checkin:   find(HEADER_PATTERNS.checkin)   >= 0 ? find(HEADER_PATTERNS.checkin)   : DEFAULT_COL.checkin,
+      checkout:  find(HEADER_PATTERNS.checkout)  >= 0 ? find(HEADER_PATTERNS.checkout)  : DEFAULT_COL.checkout,
+      note:      find(HEADER_PATTERNS.note)      >= 0 ? find(HEADER_PATTERNS.note)      : DEFAULT_COL.note,
+      nickname:  find(HEADER_PATTERNS.nickname)  >= 0 ? find(HEADER_PATTERNS.nickname)  : DEFAULT_COL.nickname,
+      shiftCode: find(HEADER_PATTERNS.shiftCode) >= 0 ? find(HEADER_PATTERNS.shiftCode) : DEFAULT_COL.shiftCode,
+    }
+  }
 
   // Convert Excel time/datetime serial to "HH:MM" string
   const toTimeStr = (v: unknown): string | undefined => {
@@ -180,6 +218,11 @@ attendanceRouter.post('/import', ...guard('hr'), async (c) => {
   }
 
   const DAILY_SHEET_RE = /^วันที่\s*(\d+)/i
+  // Detect header row and column map from the first daily sheet, reuse for all subsequent sheets
+  let COL = DEFAULT_COL
+  let headerRowIndex = 7
+  let colMapResolved = false
+
   for (const sheetName of wb.SheetNames) {
     const m = sheetName.match(DAILY_SHEET_RE)
     if (!m) continue
@@ -189,8 +232,14 @@ attendanceRouter.post('/import', ...guard('hr'), async (c) => {
     // raw:true preserves Excel numeric serials so we can extract date from checkin
     const rows = utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: true, defval: null })
 
-    // Header is at index 7, data starts at index 8 (same as frontend parser)
-    for (let i = 8; i < rows.length; i++) {
+    if (!colMapResolved) {
+      headerRowIndex = detectHeaderRow(rows)
+      const headerRow = (rows[headerRowIndex] as unknown[] || []).map(c => c == null ? '' : String(c))
+      COL = buildColMap(headerRow)
+      colMapResolved = true
+    }
+
+    for (let i = headerRowIndex + 1; i < rows.length; i++) {
       const row = rows[i] as unknown[]
       if (!row) continue
       const fullName = row[COL.fullName] != null ? String(row[COL.fullName]).trim() : ''
