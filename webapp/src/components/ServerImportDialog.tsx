@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { apiFetch } from '../utils/apiFetch'
 import { X, Loader2, CheckCircle2, AlertTriangle, Database } from 'lucide-react'
 import { useWarehouses } from '../api/usePeriods'
 import type { AuthUser } from '../auth/useAuth'
@@ -102,9 +103,9 @@ export default function ServerImportDialog({ user, fileBuffer, fileName, onClose
     try {
       const form = new FormData()
       form.append('file', new Blob([fileBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), fileName)
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/attendance/import?warehouse=${encodeURIComponent(warehouseId)}&yearMonth=${encodeURIComponent(yearMonth)}`,
-        { method: 'POST', body: form, credentials: 'include' }
+        { method: 'POST', body: form }
       )
       const json = await res.json() as { success: boolean; data?: ImportPreview; message?: string }
       if (!json.success || !json.data) {
@@ -125,10 +126,8 @@ export default function ServerImportDialog({ user, fileBuffer, fileName, onClose
     setStage('committing')
     setErr(null)
     try {
-      const res = await fetch('/api/attendance/import/commit', {
+      const res = await apiFetch('/api/attendance/import/commit', {
         method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ importSessionId: preview.importSessionId }),
       })
       const json = await res.json() as { success: boolean; data?: { imported: number; skipped: number; errors: string[] }; message?: string }

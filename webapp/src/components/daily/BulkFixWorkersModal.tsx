@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { apiFetch } from '../../utils/apiFetch'
 import { X, Save, Loader2, CheckCircle2, AlertTriangle, UserPlus } from 'lucide-react'
 import { useWarehouse } from '../../context/WarehouseContext'
 import { useI18n } from '../../i18n/I18n'
@@ -86,10 +87,8 @@ export default function BulkFixWorkersModal({ pendingNames, onClose, onSaved }: 
         if (r.departmentCode) payload.departmentCode = r.departmentCode
         if (r.nickname) payload.notes = `Nickname: ${r.nickname}`
         try {
-          const res = await fetch('/api/workers', {
+          const res = await apiFetch('/api/workers', {
             method: 'POST',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
           })
           const json = await res.json()

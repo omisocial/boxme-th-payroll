@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { apiFetch } from '../../utils/apiFetch'
 import * as XLSX from 'xlsx'
 import { X, Upload, Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { useWarehouses } from '../../api/usePeriods'
@@ -107,10 +108,8 @@ export default function BulkImportWorkersModal({ country, onClose, onSuccess }: 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i]
       try {
-        const res = await fetch('/api/workers', {
+        const res = await apiFetch('/api/workers', {
           method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             warehouseId,
             code: row.code,

@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { supabase } from '../utils/supabase'
+
 interface LoginPageProps {
   onLogin: (email: string, password: string) => Promise<{ ok: boolean; message?: string }>
 }
@@ -8,6 +10,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [forgotSent, setForgotSent] = useState(false)
+  const [forgotLoading, setForgotLoading] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -16,6 +20,17 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     const result = await onLogin(email, password)
     setLoading(false)
     if (!result.ok) setError(result.message ?? 'Login failed')
+  }
+
+  const handleForgotPassword = async () => {
+    if (!email) { setError('Enter your email address first'); return }
+    setForgotLoading(true)
+    setError('')
+    await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    })
+    setForgotLoading(false)
+    setForgotSent(true)
   }
 
   return (
@@ -58,6 +73,12 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
               <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>
             )}
 
+            {forgotSent && (
+              <p className="text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2">
+                Password reset email sent. Check your inbox.
+              </p>
+            )}
+
             <button
               type="submit"
               disabled={loading}
@@ -68,9 +89,14 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
           </form>
 
           <div className="mt-4 text-center">
-            <a href="/forgot-password" className="text-xs text-blue-600 hover:underline">
-              Forgot password?
-            </a>
+            <button
+              type="button"
+              onClick={handleForgotPassword}
+              disabled={forgotLoading}
+              className="text-xs text-blue-600 hover:underline disabled:opacity-60"
+            >
+              {forgotLoading ? 'Sending…' : 'Forgot password?'}
+            </button>
           </div>
         </div>
 
