@@ -21,6 +21,8 @@ const workerCreateSchema = z.object({
   phone: z.string().optional(),
   startDate: z.string().optional(),
   notes: z.string().optional(),
+  employeeCode: z.string().optional(),
+  nationalId: z.string().optional(),
 })
 
 // GET /api/warehouses — list warehouses by country (used in period create dialog)
@@ -61,7 +63,7 @@ workersRouter.get('/', ...guard('viewer'), async (c) => {
   if (dept) query = query.eq('department_code', dept)
   if (jobType) query = query.eq('job_type_code', jobType)
   if (warehouseId) query = query.eq('warehouse_id', warehouseId)
-  if (q) query = query.or(`name_local.ilike.%${q}%,name_en.ilike.%${q}%,code.ilike.%${q}%`)
+  if (q) query = query.or(`name_local.ilike.%${q}%,name_en.ilike.%${q}%,code.ilike.%${q}%,employee_code.ilike.%${q}%`)
 
   const { data, count, error } = await query
     .order('name_local')
@@ -125,6 +127,8 @@ workersRouter.post('/', ...guard('hr'), zValidator('json', workerCreateSchema), 
       phone: body.phone ?? null,
       start_date: body.startDate ?? null,
       notes: body.notes ?? null,
+      employee_code: body.employeeCode ?? null,
+      national_id: body.nationalId ?? null,
     })
     .select()
     .single()
@@ -160,7 +164,8 @@ workersRouter.patch('/:id', ...guard('hr'), async (c) => {
 
   const body = await c.req.json<Record<string, unknown>>()
   const allowed = ['name_local','name_en','department_code','shift_code','grade_id',
-    'job_type_code','bank_code','bank_account','phone','start_date','end_date','status','notes']
+    'job_type_code','bank_code','bank_account','phone','start_date','end_date','status','notes',
+    'employee_code','national_id']
 
   const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() }
   for (const [k, v] of Object.entries(body)) {
@@ -264,59 +269,127 @@ workersRouter.delete('/:id', ...guard('hr'), async (c) => {
 
 // POST /api/workers/resolve — match attendance names to DB workers; auto-create
 // missing ones with status='pending_update' and created_via='attendance_import'.
+//
+// Accepts either the legacy { warehouseId, fullNames } payload OR the richer
+// { warehouseId, workers: [{ fullName, employeeCode?, nationalId? }] } payload.
+// Priority: employeeCode match → nationalId match → name match (case-insensitive).
 workersRouter.post('/resolve', ...guard('hr'), async (c) => {
   const sb = getSupabase(c.env)
   const user = c.get('user')
   const country = user.country_scope === '*' ? (c.req.query('country') ?? 'TH') : user.country_scope
-  const { warehouseId, fullNames } = await c.req.json<{ warehouseId: string; fullNames: string[] }>()
 
-  if (!warehouseId || !Array.isArray(fullNames) || fullNames.length === 0) {
-    return c.json({ success: false, message: 'warehouseId and fullNames required' }, 400)
+  type ResolveEntry = { fullName: string; employeeCode?: string; nationalId?: string }
+  const body = await c.req.json<{
+    warehouseId: string
+    fullNames?: string[]
+    workers?: ResolveEntry[]
+  }>()
+
+  const { warehouseId } = body
+  if (!warehouseId) {
+    return c.json({ success: false, message: 'warehouseId required' }, 400)
   }
 
-  const unique = [...new Set(fullNames.map(n => n.trim()).filter(Boolean))]
+  // Normalise to ResolveEntry[]
+  let entries: ResolveEntry[] = []
+  if (Array.isArray(body.workers) && body.workers.length > 0) {
+    entries = body.workers
+  } else if (Array.isArray(body.fullNames) && body.fullNames.length > 0) {
+    entries = body.fullNames.map(n => ({ fullName: n.trim() })).filter(e => e.fullName)
+  } else {
+    return c.json({ success: false, message: 'workers or fullNames required' }, 400)
+  }
+
+  // De-duplicate by fullName (keep first)
+  const seen = new Set<string>()
+  entries = entries.filter(e => {
+    if (seen.has(e.fullName)) return false
+    seen.add(e.fullName)
+    return true
+  })
 
   // Fetch existing active workers for this warehouse
   const { data: existing } = await sb.from('workers')
-    .select('id, name_local')
+    .select('id, name_local, employee_code, national_id')
     .eq('country_code', country)
     .eq('warehouse_id', warehouseId)
     .is('deleted_at', null)
 
-  const existingMap = new Map<string, string>()
-  for (const w of existing ?? []) {
-    existingMap.set((w as { name_local: string }).name_local.toLowerCase(), (w as { id: string }).id)
+  type WorkerRow = { id: string; name_local: string; employee_code: string | null; national_id: string | null }
+  const existingWorkers: WorkerRow[] = (existing ?? []) as WorkerRow[]
+
+  // Build lookup maps
+  const byEmployeeCode = new Map<string, string>()  // employee_code (lower) → worker id
+  const byNationalId   = new Map<string, string>()  // national_id (lower) → worker id
+  const byName         = new Map<string, string[]>() // name (lower) → [worker id, ...]  (may be multiple!)
+
+  for (const w of existingWorkers) {
+    if (w.employee_code) byEmployeeCode.set(w.employee_code.toLowerCase(), w.id)
+    if (w.national_id)   byNationalId.set(w.national_id.toLowerCase(), w.id)
+    const nameLower = w.name_local.toLowerCase()
+    if (!byName.has(nameLower)) byName.set(nameLower, [])
+    byName.get(nameLower)!.push(w.id)
   }
 
-  const results: Array<{ name: string; workerId: string; created: boolean }> = []
+  const results: Array<{
+    name: string; workerId: string; created: boolean; matchedBy?: string; warning?: string
+  }> = []
 
-  for (const name of unique) {
-    const existing_id = existingMap.get(name.toLowerCase())
-    if (existing_id) {
-      results.push({ name, workerId: existing_id, created: false })
-      continue
+  for (const entry of entries) {
+    const { fullName, employeeCode, nationalId } = entry
+
+    // 1. Match by employeeCode
+    if (employeeCode) {
+      const wid = byEmployeeCode.get(employeeCode.toLowerCase())
+      if (wid) { results.push({ name: fullName, workerId: wid, created: false, matchedBy: 'employee_code' }); continue }
     }
-    // Auto-create with pending_update
+
+    // 2. Match by nationalId
+    if (nationalId) {
+      const wid = byNationalId.get(nationalId.toLowerCase())
+      if (wid) { results.push({ name: fullName, workerId: wid, created: false, matchedBy: 'national_id' }); continue }
+    }
+
+    // 3. Match by name (case-insensitive)
+    const nameMatches = byName.get(fullName.toLowerCase()) ?? []
+    if (nameMatches.length === 1) {
+      results.push({ name: fullName, workerId: nameMatches[0], created: false, matchedBy: 'name' }); continue
+    }
+    if (nameMatches.length > 1) {
+      // Duplicate names — pick the first but warn
+      results.push({
+        name: fullName, workerId: nameMatches[0], created: false, matchedBy: 'name',
+        warning: `Multiple workers found with name "${fullName}" — matched to first. Provide employeeCode or nationalId to disambiguate.`,
+      }); continue
+    }
+
+    // 4. Not found — auto-create with pending_update
     const code = `AUTO-${Date.now().toString(36).toUpperCase()}`
     const { data: created, error } = await sb.from('workers')
       .insert({
         country_code: country,
         warehouse_id: warehouseId,
         code,
-        name_local: name,
+        name_local: fullName,
         status: 'pending_update',
         created_via: 'attendance_import',
         job_type_code: 'GENERAL',
+        employee_code: employeeCode ?? null,
+        national_id: nationalId ?? null,
       })
       .select('id')
       .single()
 
     if (error) continue
-    results.push({ name, workerId: (created as { id: string }).id, created: true })
+    results.push({ name: fullName, workerId: (created as { id: string }).id, created: true })
   }
 
   const createdCount = results.filter(r => r.created).length
-  return c.json({ success: true, data: { results, summary: { total: results.length, created: createdCount } } })
+  const warningCount = results.filter(r => r.warning).length
+  return c.json({
+    success: true,
+    data: { results, summary: { total: results.length, created: createdCount, warnings: warningCount } },
+  })
 })
 
 function maskAccount(acc?: string): string {

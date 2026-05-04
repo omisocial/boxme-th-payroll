@@ -1,8 +1,45 @@
 import * as XLSX from 'xlsx'
 import type { AttendanceRow, DamageRecord, Member, ParsedWorkbook } from './types'
-import { DEFAULT_MAPPING, isMappingComplete, resolveMapping, type ColumnMapping } from './mapping'
+import { DEFAULT_MAPPING, autoDetectMapping, isMappingComplete, resolveMapping, type ColumnMapping } from './mapping'
 
 const DAILY_SHEET_RE = /^วันที่\s*(\d+)/i // matches "วันที่ 1", "วันที่ 3 กะดึก"
+
+// Detect header row by running auto-detection on row 0 and row 7.
+// Prefers row 0 (simplified template); falls back to row 7 (legacy Boxme TH layout).
+function detectHeaderRow(data: any[][]): { headerRowIndex: number; headers: (string | null)[] } {
+  let bestIdx = 0
+  let bestConfidence = -1
+  let bestHeaders: (string | null)[] = []
+  for (const rowIdx of [0, 7]) {
+    if (rowIdx >= data.length) continue
+    const headers: (string | null)[] = (data[rowIdx] || []).map((c: any) =>
+      c == null ? null : String(c)
+    )
+    const { confidence } = autoDetectMapping(headers)
+    if (confidence > bestConfidence) {
+      bestConfidence = confidence
+      bestIdx = rowIdx
+      bestHeaders = headers
+    }
+  }
+  return { headerRowIndex: bestIdx, headers: bestHeaders }
+}
+
+// Collect up to 3 non-empty sample values per column from the first data rows.
+function extractSampleValues(data: any[][], dataStart: number, numCols: number): Record<number, string[]> {
+  const samples: Record<number, string[]> = {}
+  for (let r = dataStart; r < Math.min(dataStart + 3, data.length); r++) {
+    const row = data[r] || []
+    for (let c = 0; c < numCols; c++) {
+      const v = row[c]
+      if (v != null && v !== '') {
+        if (!samples[c]) samples[c] = []
+        if (samples[c].length < 3) samples[c].push(String(v).trim().slice(0, 24))
+      }
+    }
+  }
+  return samples
+}
 
 // Excel datetime serial => HH:MM:SS string + ISO if has date
 function excelTimeToString(v: unknown): string | undefined {
@@ -70,6 +107,8 @@ export function parseWorkbook(file: ArrayBuffer, fileName: string, mappingOverri
         bankCode: str(row[5]),
         department: str(row[7]),
         startDate: str(row[8]),
+        employeeCode: str(row[9]),
+        nationalId: str(row[10]),
       })
     }
   } else {
@@ -106,12 +145,14 @@ export function parseWorkbook(file: ArrayBuffer, fileName: string, mappingOverri
 
   // 3) Daily sheets
   // Strategy:
-  //   - Take headers from row 8 (index 7) of the FIRST daily sheet found.
+  //   - Detect header row (row 0 = new template, row 7 = legacy) from the first daily sheet.
   //   - Resolve mapping (saved → auto-detect → default).
   //   - If incomplete and no override provided, return early with `requiresMapping=true`.
   let headerSample: (string | null)[] = []
+  let sampleValues: Record<number, string[]> = {}
   let mapping: ColumnMapping = mappingOverride || DEFAULT_MAPPING
   let firstHeaderCaptured = false
+  let detectedHeaderRow = 7 // legacy default
 
   for (const sheetName of wb.SheetNames) {
     const m = sheetName.match(DAILY_SHEET_RE)
@@ -119,8 +160,11 @@ export function parseWorkbook(file: ArrayBuffer, fileName: string, mappingOverri
     daysFound.push(sheetName)
     if (!firstHeaderCaptured) {
       const ws = wb.Sheets[sheetName]
-      const headerRow = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, raw: true, defval: null })[7] || []
-      headerSample = headerRow.map((c: any) => (c == null ? null : String(c)))
+      const allRows = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, raw: true, defval: null })
+      const detected = detectHeaderRow(allRows)
+      detectedHeaderRow = detected.headerRowIndex
+      headerSample = detected.headers
+      sampleValues = extractSampleValues(allRows, detectedHeaderRow + 1, headerSample.length)
       firstHeaderCaptured = true
 
       if (!mappingOverride) {
@@ -136,21 +180,23 @@ export function parseWorkbook(file: ArrayBuffer, fileName: string, mappingOverri
             warnings,
             requiresMapping: true,
             sampleHeaders: headerSample,
+            sampleValues,
             suggestedMapping: mapping,
             mappingSource: resolved.source,
+            detectedHeaderRow,
           }
         }
       } else if (!isMappingComplete(mapping)) {
         return {
           fileName, members, attendance: [], damages, daysFound, warnings,
-          requiresMapping: true, sampleHeaders: headerSample,
-          suggestedMapping: mapping, mappingSource: 'default',
+          requiresMapping: true, sampleHeaders: headerSample, sampleValues,
+          suggestedMapping: mapping, mappingSource: 'default', detectedHeaderRow,
         }
       }
     }
   }
 
-  // Pass 2: actually parse rows using the resolved mapping
+  // Pass 2: parse rows using resolved mapping, data starts at detectedHeaderRow + 1
   for (const sheetName of daysFound) {
     const m = sheetName.match(DAILY_SHEET_RE)
     if (!m) continue
@@ -158,7 +204,7 @@ export function parseWorkbook(file: ArrayBuffer, fileName: string, mappingOverri
     const ws = wb.Sheets[sheetName]
     const data = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, raw: true, defval: null })
 
-    for (let i = 8; i < data.length; i++) {
+    for (let i = detectedHeaderRow + 1; i < data.length; i++) {
       const row = data[i]
       if (!row) continue
       const fullName = str(row[mapping.fullName])
@@ -200,6 +246,8 @@ export function parseWorkbook(file: ArrayBuffer, fileName: string, mappingOverri
     fileName, members, attendance, damages, daysFound, warnings,
     requiresMapping: false,
     sampleHeaders: headerSample,
+    sampleValues,
     suggestedMapping: mapping,
+    detectedHeaderRow,
   }
 }

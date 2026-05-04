@@ -6,6 +6,7 @@ import Toolbar from './components/Toolbar'
 import WorkerTable from './components/WorkerTable'
 import WorkerDetail from './components/WorkerDetail'
 import MappingDialog from './components/MappingDialog'
+import ValidationSummaryBar from './components/ValidationSummaryBar'
 import HelpPanel from './components/HelpPanel'
 import LoginPage from './components/LoginPage'
 import ChangePasswordPage from './components/ChangePasswordPage'
@@ -16,18 +17,23 @@ import { exportDailyXlsx, exportWorkerSummaryXlsx, exportBankCsv } from './payro
 import { downloadTemplate } from './payroll/template'
 import { saveMapping, type ColumnMapping } from './payroll/mapping'
 import type { ParsedWorkbook, PayrollResult, WorkerSummary } from './payroll/types'
-import { AlertTriangle, Sparkles, Settings, CheckCircle2, LogOut, User, Users, Shield, Leaf, SlidersHorizontal } from 'lucide-react'
+import { AlertTriangle, Sparkles, Settings, CheckCircle2, LogOut } from 'lucide-react'
 import { useI18n } from './i18n/I18n'
 import { useAuth } from './auth/useAuth'
 import { useEngineConfig } from './context/ConfigContext'
 import PayrollBadges from './features/payroll/PayrollBadges'
 import WorkersPage from './components/workers/WorkersPage'
 import AdminPage from './components/admin/AdminPage'
-import SeasonalWorkersPage from './components/seasonal/SeasonalWorkersPage'
+import PaymentsPage from './components/payments/PaymentsPage'
 import SettingsPage from './components/settings/SettingsPage'
 import ServerImportDialog from './components/ServerImportDialog'
+import WorkflowStepper, { type StepKey } from './components/WorkflowStepper'
+import BulkFixWorkersModal from './components/daily/BulkFixWorkersModal'
+import MonthlyReportPage from './components/reports/MonthlyReportPage'
+import FirstRunWizard, { shouldShowOnboarding } from './components/onboarding/FirstRunWizard'
+import UserGuidePage from './components/UserGuidePage'
 
-type View = 'payroll' | 'workers' | 'seasonal' | 'settings' | 'admin'
+type View = 'payroll' | 'workers' | 'seasonal' | 'settings' | 'admin' | 'report' | 'guide'
 
 function App() {
   const { t } = useI18n()
@@ -39,13 +45,20 @@ function App() {
   const rawFileRef = useRef<{ buf: ArrayBuffer; name: string } | null>(null)
   const [showServerImport, setShowServerImport] = useState(false)
   const [pendingBuffer, setPendingBuffer] = useState<{ buf: ArrayBuffer; name: string } | null>(null)
-  const [pendingHeaders, setPendingHeaders] = useState<{ headers: (string | null)[]; mapping: ColumnMapping } | null>(null)
+  const [pendingHeaders, setPendingHeaders] = useState<{
+    headers: (string | null)[]
+    mapping: ColumnMapping
+    sampleValues?: Record<number, string[]>
+    mappingSource?: 'saved' | 'auto' | 'default'
+  } | null>(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [selected, setSelected] = useState<WorkerSummary | null>(null)
   const [showConfig, setShowConfig] = useState(false)
   const [helpTab, setHelpTab] = useState<'guide' | 'formula' | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  const [bulkFixNames, setBulkFixNames] = useState<string[] | null>(null)
+  const [showOnboarding, setShowOnboarding] = useState<boolean>(() => shouldShowOnboarding())
 
   const computed = useMemo(() => {
     if (!workbook || workbook.requiresMapping) return null
@@ -80,7 +93,12 @@ function App() {
       const parsed = parseWorkbook(buf, name)
       if (parsed.requiresMapping) {
         setPendingBuffer({ buf, name })
-        setPendingHeaders({ headers: parsed.sampleHeaders || [], mapping: parsed.suggestedMapping! })
+        setPendingHeaders({
+          headers: parsed.sampleHeaders || [],
+          mapping: parsed.suggestedMapping!,
+          sampleValues: parsed.sampleValues,
+          mappingSource: parsed.mappingSource,
+        })
         setWorkbook(null)
       } else if (parsed.attendance.length === 0) {
         setErr(t('err.noData'))
@@ -114,35 +132,51 @@ function App() {
     setPendingBuffer(null)
   }
 
-  const roleLabel: Record<string, string> = {
-    super_admin: 'Super Admin',
-    country_admin: 'Country Admin',
-    hr: 'HR',
-    supervisor: 'Supervisor',
-    viewer: 'Viewer',
+  // Batch-apply a shift code to all UNKNOWN_SHIFT attendance rows, then recompute
+  function handleFixShift(shiftCode: string) {
+    if (!workbook) return
+    const patched = {
+      ...workbook,
+      attendance: workbook.attendance.map(a =>
+        a.shiftCode ? a : { ...a, shiftCode }
+      ),
+    }
+    setWorkbook(patched)
   }
 
   const canAdmin = auth.user.role === 'super_admin' || auth.user.role === 'country_admin'
 
-  const navTabs: { id: View; label: string; icon: React.ReactNode }[] = [
-    { id: 'payroll', label: 'Payroll', icon: <Sparkles size={14} /> },
-    { id: 'workers', label: 'Workers', icon: <Users size={14} /> },
-    { id: 'seasonal', label: 'Seasonal', icon: <Leaf size={14} /> },
-    ...(canAdmin ? [{ id: 'settings' as View, label: 'Settings', icon: <SlidersHorizontal size={14} /> }] : []),
-    ...(canAdmin ? [{ id: 'admin' as View, label: 'Admin', icon: <Shield size={14} /> }] : []),
-  ]
+  const currentStep: StepKey = view === 'payroll'
+    ? (workbook && computed ? 'calculate' : 'import')
+    : view === 'workers'
+    ? 'fix'
+    : view === 'seasonal'
+    ? 'pay'
+    : view === 'report'
+    ? 'report'
+    : 'import'
+
+  const stepDone: StepKey[] = []
+  if (workbook && computed) {
+    stepDone.push('import')
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Header onOpenHelp={() => setHelpTab('guide')}>
-        {/* User badge in header */}
-        <div className="flex items-center gap-2 ml-auto">
-          <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 text-xs text-slate-600">
-            <User size={12} />
-            <span>{auth.user.email}</span>
-            <span className="px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
-              {roleLabel[auth.user.role] ?? auth.user.role}
-            </span>
+      <Header
+        onOpenHelp={() => setHelpTab('guide')}
+        onOpenGuide={() => setView('guide')}
+        canAdmin={canAdmin}
+        onOpenSettings={() => setView('settings')}
+        onOpenAdmin={() => setView('admin')}
+      >
+        {/* User avatar initials + logout */}
+        <div className="flex items-center gap-1">
+          <div
+            className="h-7 w-7 rounded-full bg-blue-600 text-white text-xs font-bold grid place-items-center select-none"
+            title={auth.user.email}
+          >
+            {auth.user.email.slice(0, 2).toUpperCase()}
           </div>
           <button
             onClick={auth.logout}
@@ -154,28 +188,28 @@ function App() {
         </div>
       </Header>
 
-      {/* Tab navigation */}
-      <div className="bg-white border-b border-slate-200 sticky top-[57px] sm:top-[73px] z-20">
-        <div className="max-w-7xl mx-auto px-3 sm:px-6 flex gap-0.5 overflow-x-auto">
-          {navTabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setView(tab.id)}
-              className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition -mb-px ${
-                view === tab.id
-                  ? 'border-blue-600 text-blue-700'
-                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-              }`}
-            >
-              {tab.icon} {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      {view !== 'guide' && (
+        <WorkflowStepper
+          current={currentStep}
+          done={stepDone}
+          onJump={k => {
+            if (k === 'import')    setView('payroll')
+            else if (k === 'fix')       setView('workers')
+            else if (k === 'calculate') setView('payroll')
+            else if (k === 'pay')       setView('seasonal')
+            else if (k === 'report')    setView('report')
+          }}
+        />
+      )}
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-8 space-y-4 sm:space-y-6">
+      {view === 'guide' && (
+        <UserGuidePage onBack={() => setView('payroll')} />
+      )}
+
+      <main className={`flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-8 space-y-4 sm:space-y-6 ${view === 'guide' ? 'hidden' : ''}`}>
         {view === 'workers' && <WorkersPage user={auth.user} />}
-        {view === 'seasonal' && <SeasonalWorkersPage user={auth.user} />}
+        {view === 'seasonal' && <PaymentsPage user={auth.user} />}
+        {view === 'report' && <MonthlyReportPage />}
         {view === 'settings' && canAdmin && <SettingsPage user={auth.user} />}
         {view === 'admin' && canAdmin && <AdminPage user={auth.user} />}
 
@@ -191,7 +225,7 @@ function App() {
             <Uploader
               onFile={handleFile}
               loading={loading}
-              onDownloadTemplate={() => downloadTemplate()}
+              onDownloadTemplate={() => downloadTemplate(config.currency)}
               onOpenGuide={() => setHelpTab('guide')}
               onOpenFormula={() => setHelpTab('formula')}
             />
@@ -209,9 +243,9 @@ function App() {
               fileName={workbook.fileName}
               daysCount={workbook.daysFound.length}
               onReset={() => { setWorkbook(null); setErr(null); rawFileRef.current = null }}
-              onExportDaily={() => exportDailyXlsx(computed.rows, `payroll-daily-${stamp()}.xlsx`)}
-              onExportWorkers={() => exportWorkerSummaryXlsx(computed.workers, `payroll-workers-${stamp()}.xlsx`)}
-              onExportBank={() => exportBankCsv(computed.workers, 'ALL', `bank-export-${stamp()}.csv`)}
+              onExportDaily={() => exportDailyXlsx(computed.rows, `payroll-daily-${stamp()}.xlsx`, config.currency)}
+              onExportWorkers={() => exportWorkerSummaryXlsx(computed.workers, `payroll-workers-${stamp()}.xlsx`, config.currency)}
+              onExportBank={() => exportBankCsv(computed.workers, 'ALL', `bank-export-${stamp()}.csv`, config.currency)}
               onSaveToDB={() => setShowServerImport(true)}
             />
 
@@ -232,6 +266,7 @@ function App() {
               members={workbook.members}
               currencySymbol={config.currencySymbol}
               onOpenPendingWorkers={() => setView('workers')}
+              onOpenBulkFix={(names) => setBulkFixNames(names)}
             />
 
             <StatCards summary={computed.summary} />
@@ -257,6 +292,7 @@ function App() {
               </div>
             )}
 
+            <ValidationSummaryBar rows={computed.rows} onFixShift={handleFixShift} />
             <WorkerTable workers={computed.workers} onSelect={setSelected} />
           </>
         )}
@@ -271,6 +307,8 @@ function App() {
         <MappingDialog
           headers={pendingHeaders.headers}
           initialMapping={pendingHeaders.mapping}
+          mappingSource={pendingHeaders.mappingSource}
+          sampleValues={pendingHeaders.sampleValues}
           onSave={applyMapping}
           onCancel={() => { setPendingHeaders(null); setPendingBuffer(null) }}
         />
@@ -284,6 +322,18 @@ function App() {
         />
       )}
       {helpTab && <HelpPanel tab={helpTab} onClose={() => setHelpTab(null)} />}
+      {showOnboarding && <FirstRunWizard onClose={() => setShowOnboarding(false)} />}
+      {bulkFixNames && (
+        <BulkFixWorkersModal
+          pendingNames={bulkFixNames}
+          onClose={() => setBulkFixNames(null)}
+          onSaved={(n) => {
+            setBulkFixNames(null)
+            setToast(t('toast.workersCreated').replace('{n}', String(n)))
+            setTimeout(() => setToast(null), 4000)
+          }}
+        />
+      )}
 
       {toast && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[60] bg-emerald-600 text-white px-4 py-2.5 rounded-xl shadow-xl text-sm flex items-center gap-2">

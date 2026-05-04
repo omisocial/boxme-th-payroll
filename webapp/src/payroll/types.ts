@@ -46,6 +46,8 @@ export interface Member {
   bankCode?: string
   department?: string
   startDate?: string
+  employeeCode?: string  // Boxme HRMS employee ID (e.g. BKK-1234)
+  nationalId?: string    // Citizen ID / CCCD / Passport
 }
 
 export interface AttendanceRow {
@@ -125,8 +127,13 @@ export interface ParsedWorkbook {
   warnings: string[]
   requiresMapping?: boolean
   sampleHeaders?: (string | null)[]
+  // First 3 values per column index from the first daily sheet data rows.
+  // Used by MappingDialog to show sample data next to each column name.
+  sampleValues?: Record<number, string[]>
   suggestedMapping?: ColumnMapping
   mappingSource?: 'saved' | 'auto' | 'default'
+  // Which row index the header was detected at (0 = new format, 7 = legacy)
+  detectedHeaderRow?: number
 }
 
 export interface PeriodSummary {
@@ -146,6 +153,8 @@ export interface WorkerSummary {
   bankAccount?: string
   bankCode?: string
   department?: string
+  employeeCode?: string  // Boxme HRMS employee ID
+  nationalId?: string    // Citizen ID / CCCD / Passport
   shifts: number
   totalGross: number
   totalOt: number

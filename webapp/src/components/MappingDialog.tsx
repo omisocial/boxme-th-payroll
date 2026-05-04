@@ -1,11 +1,18 @@
 import { useMemo, useState } from 'react'
-import { X, Save, AlertTriangle } from 'lucide-react'
+import { X, Save, AlertTriangle, CheckCircle2, Info } from 'lucide-react'
 import { useI18n } from '../i18n/I18n'
-import { OPTIONAL_FIELDS, REQUIRED_FIELDS, isMappingComplete, type ColumnMapping, type FieldKey } from '../payroll/mapping'
+import {
+  OPTIONAL_FIELDS, REQUIRED_FIELDS, isMappingComplete,
+  getFieldKeywords, getMappingConfidence,
+  type ColumnMapping, type FieldKey,
+} from '../payroll/mapping'
 
 interface Props {
   headers: (string | null)[]
   initialMapping: ColumnMapping
+  mappingSource?: 'saved' | 'auto' | 'default'
+  // First 3 sample cell values per column index — from the actual data rows
+  sampleValues?: Record<number, string[]>
   onSave: (m: ColumnMapping) => void
   onCancel: () => void
 }
@@ -24,7 +31,7 @@ const FIELD_LABELS: Record<FieldKey, string> = {
   other: 'map.field.other',
 }
 
-export default function MappingDialog({ headers, initialMapping, onSave, onCancel }: Props) {
+export default function MappingDialog({ headers, initialMapping, mappingSource = 'default', sampleValues, onSave, onCancel }: Props) {
   const { t } = useI18n()
   const [m, setM] = useState<ColumnMapping>(initialMapping)
 
@@ -59,10 +66,14 @@ export default function MappingDialog({ headers, initialMapping, onSave, onCance
             {(field) => (
               <FieldRow
                 key={field}
+                field={field}
                 label={t(FIELD_LABELS[field] as any)}
                 value={m[field]}
                 options={headerOptions}
                 required
+                mappingSource={mappingSource}
+                sampleValues={sampleValues}
+                headers={headers}
                 onChange={(v) => set(field, v)}
                 placeholder={t('map.notMapped')}
               />
@@ -73,9 +84,13 @@ export default function MappingDialog({ headers, initialMapping, onSave, onCance
             {(field) => (
               <FieldRow
                 key={field}
+                field={field}
                 label={t(FIELD_LABELS[field] as any)}
                 value={m[field]}
                 options={headerOptions}
+                mappingSource={mappingSource}
+                sampleValues={sampleValues}
+                headers={headers}
                 onChange={(v) => set(field, v)}
                 placeholder={t('map.notMapped')}
               />
@@ -109,38 +124,80 @@ function Section({ title, fields, required, children }: {
       <div className="text-xs font-semibold uppercase tracking-wide mb-2 flex items-center gap-2">
         <span className={required ? 'text-rose-600' : 'text-slate-500'}>{title}</span>
       </div>
-      <div className="space-y-2">
+      <div className="space-y-3">
         {fields.map(f => children(f))}
       </div>
     </div>
   )
 }
 
-function FieldRow({ label, value, options, onChange, placeholder, required }: {
+function FieldRow({ label, value, options, onChange, placeholder, required, field, mappingSource, sampleValues, headers }: {
   label: string
   value: number
   options: { idx: number; label: string }[]
   onChange: (v: number) => void
   placeholder: string
   required?: boolean
+  field: FieldKey
+  mappingSource: 'saved' | 'auto' | 'default'
+  sampleValues?: Record<number, string[]>
+  headers: (string | null)[]
 }) {
+  const confidence = getMappingConfidence(field, headers, mappingSource)
+  const samples = value >= 0 && sampleValues ? (sampleValues[value] ?? []) : []
+  const keywords = getFieldKeywords(field)
+
   return (
-    <label className="flex items-center gap-3 sm:gap-4">
-      <div className="text-sm font-medium text-slate-700 w-1/2 sm:w-1/3 min-w-0">
-        {label} {required && <span className="text-rose-500">*</span>}
-      </div>
-      <select
-        value={value}
-        onChange={e => onChange(parseInt(e.target.value, 10))}
-        className={`flex-1 px-3 py-2 text-sm rounded-lg border bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 ${value < 0 && required ? 'border-rose-300' : 'border-slate-200'}`}
-      >
-        <option value={-1}>{placeholder}</option>
-        {options.map(o => (
-          <option key={o.idx} value={o.idx}>{o.label}</option>
-        ))}
-      </select>
-    </label>
+    <div className="space-y-1">
+      <label className="flex items-center gap-3 sm:gap-4">
+        <div className="flex items-center gap-1.5 w-1/2 sm:w-1/3 min-w-0">
+          <ConfidenceDot confidence={confidence} />
+          <span className="text-sm font-medium text-slate-700 truncate">
+            {label} {required && <span className="text-rose-500">*</span>}
+          </span>
+        </div>
+        <select
+          value={value}
+          onChange={e => onChange(parseInt(e.target.value, 10))}
+          className={`flex-1 px-3 py-2 text-sm rounded-lg border bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 ${value < 0 && required ? 'border-rose-300' : 'border-slate-200'}`}
+        >
+          <option value={-1}>{placeholder}</option>
+          {options.map(o => (
+            <option key={o.idx} value={o.idx}>{o.label}</option>
+          ))}
+        </select>
+      </label>
+
+      {/* Sample values from actual data rows */}
+      {samples.length > 0 && (
+        <div className="ml-[calc(33%+1rem)] flex flex-wrap gap-1">
+          {samples.map((s, i) => (
+            <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-500 text-xs rounded font-mono">
+              {s}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Keyword hint when column not yet mapped */}
+      {value < 0 && keywords && (
+        <div className="ml-[calc(33%+1rem)] flex items-center gap-1 text-xs text-slate-400">
+          <Info size={10} />
+          <span className="truncate">{keywords}</span>
+        </div>
+      )}
+    </div>
   )
+}
+
+function ConfidenceDot({ confidence }: { confidence: 'saved' | 'auto' | 'default' | 'unmapped' }) {
+  if (confidence === 'saved' || confidence === 'auto') {
+    return <CheckCircle2 size={12} className="text-emerald-500 shrink-0" />
+  }
+  if (confidence === 'default') {
+    return <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0 inline-block" />
+  }
+  return <span className="w-2 h-2 rounded-full bg-rose-400 shrink-0 inline-block" />
 }
 
 function columnLetter(idx: number): string {

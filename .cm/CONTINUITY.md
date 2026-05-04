@@ -8,10 +8,10 @@
 UAT end-to-end walkthrough — seed real workers from Members sheet, import April 2026 attendance via server, run period lock → approve → export flow on real data.
 
 ## Current Phase
-**DEPLOY + UAT** — Phase 4 UI implementation complete. Build clean. Need to deploy then run UAT walkthrough (tasks 3.1–3.8).
+**UAT** — PR #3 merged to main. Phase 4 code live. Next: deploy + run UAT walkthrough (tasks 3.1–3.8).
 
 ## Next Actions (first 3 tasks)
-1. Deploy: `cd webapp && npm run build && wrangler pages deploy dist` (or `npm run deploy`)
+1. Deploy: `cd webapp && npm run deploy` (builds + pushes to Cloudflare Pages)
 2. `3.1`–`3.3` — Login as `th.hr@boxme.tech` → Workers tab → Bulk Import → upload `Thailand_Sessonal_Payment.xlsx` → verify workers list count. Then Payroll tab → upload xlsx → "Save to DB" → pick warehouse + `2026-04` → preview → Commit.
 3. `3.4`–`3.7` — Periods tab → New Period (April 2026) → Lock → (admin) Approve → Export Bank CSV → verify CSV in Excel.
 
@@ -49,3 +49,4 @@ Passwords: in `.env.seed` (gitignored) → 1Password.
 - Setting a Cloudflare Pages secret does NOT auto-redeploy — must `wrangler pages deploy dist` after
 - Supabase JSONB columns: pass raw objects, NOT `JSON.stringify()` (unlike D1)
 - Excel sheet header row is index 7 (data from index 8), NOT index 0 — server import had this bug, fixed in P0
+- New Hono routes that take `period_id` (or any tenant-owned ID) MUST verify scope against `user.country_scope` AND `user.warehouse_id` before reading/mutating — `guard()` only checks role, not data ownership. Cross-tenant exposure caught in 2026-05 UX overhaul review (periodLines.ts, reports.ts). Pattern: add `assertPeriodScope(sb, periodId, user)` helper or inline the check.

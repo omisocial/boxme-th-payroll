@@ -37,6 +37,20 @@ export default function WorkerDetail({ worker, onClose }: Props) {
               {worker.department || '—'}
               {worker.bankCode && <span> · {worker.bankCode} {worker.bankAccount}</span>}
             </div>
+            {(worker.employeeCode || worker.nationalId) && (
+              <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+                {worker.employeeCode && (
+                  <span className="text-[11px] text-slate-400">
+                    {t('workers.form.employeeCode')}: <span className="font-medium text-slate-600">{worker.employeeCode}</span>
+                  </span>
+                )}
+                {worker.nationalId && (
+                  <span className="text-[11px] text-slate-400">
+                    {t('workers.form.nationalId')}: <span className="font-medium text-slate-600">{worker.nationalId}</span>
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           <button onClick={onClose} className="h-9 w-9 grid place-items-center rounded-lg hover:bg-slate-100 shrink-0">
             <X size={18} />
@@ -93,7 +107,7 @@ function DayRow({ r }: { r: PayrollResult }) {
 
       {r.flags.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
-          {r.flags.map(f => <span key={f} className={`pill ${FLAG_TONES[f] || 'bg-slate-100'}`}>{f.replace(/_/g, ' ').toLowerCase()}</span>)}
+          {r.flags.map(f => <span key={f} className={`pill ${FLAG_TONES[f] || 'bg-slate-100'}`}>{t(('flag.' + f) as any)}</span>)}
         </div>
       )}
 
