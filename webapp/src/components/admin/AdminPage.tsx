@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Plus, Trash2, Loader2, AlertTriangle, X, RefreshCw, FlaskConical, CheckCircle2, CircleDot, RotateCcw } from 'lucide-react'
 import type { AuthUser } from '../../auth/useAuth'
+import { apiFetch as globalApiFetch } from '../../utils/apiFetch'
 
 interface Props {
   user: AuthUser
@@ -28,7 +29,7 @@ interface RateConfig {
 }
 
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<{ success: boolean; data?: T; message?: string; tempPassword?: string }> {
-  const res = await fetch(path, { credentials: 'include', ...opts })
+  const res = await globalApiFetch(path, opts)
   return res.json()
 }
 
@@ -62,10 +63,8 @@ function UsersTab({ user }: { user: AuthUser }) {
     e.preventDefault()
     setSaving(true)
     setErr(null)
-    const res = await fetch('/api/admin/users', {
+    const res = await globalApiFetch('/api/admin/users', {
       method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form),
     })
     const json = await res.json() as { success: boolean; data?: AppUser & { tempPassword?: string }; message?: string }

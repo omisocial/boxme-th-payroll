@@ -328,10 +328,11 @@ CREATE INDEX IF NOT EXISTS idx_exports_period ON bank_exports(period_id);
 
 -- ─── Auth ──────────────────────────────────────────────────
 
+-- users.id must match auth.users.id (Supabase Auth manages passwords)
+-- Trigger handle_new_auth_user auto-creates this row on auth.users INSERT
 CREATE TABLE IF NOT EXISTS users (
-  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  id                    UUID PRIMARY KEY,
   email                 TEXT NOT NULL UNIQUE,
-  password_hash         TEXT NOT NULL,
   role                  TEXT NOT NULL DEFAULT 'viewer' CHECK(role IN ('super_admin','country_admin','hr','supervisor','viewer')),
   country_scope         TEXT NOT NULL DEFAULT '*',
   warehouse_id          UUID REFERENCES warehouses(id),
@@ -342,25 +343,20 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS sessions (
-  id         TEXT PRIMARY KEY,
-  user_id    UUID NOT NULL REFERENCES users(id),
-  expires_at TIMESTAMPTZ NOT NULL,
-  ip         TEXT,
-  user_agent TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+CREATE OR REPLACE FUNCTION public.handle_new_auth_user()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  INSERT INTO public.users (id, email, role, country_scope, force_password_change)
+  VALUES (NEW.id, NEW.email, 'viewer', '*', true)
+  ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+END;
+$$;
 
-CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
-
-CREATE TABLE IF NOT EXISTS reset_tokens (
-  token      TEXT PRIMARY KEY,
-  user_id    UUID NOT NULL REFERENCES users(id),
-  expires_at TIMESTAMPTZ NOT NULL,
-  used       BOOLEAN NOT NULL DEFAULT false,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_auth_user();
 
 CREATE TABLE IF NOT EXISTS audit_log (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -440,16 +436,40 @@ INSERT INTO bank_export_templates (country_code, bank_code, bank_name, format, e
    '[{"header":"Account No","field":"bank_account"},{"header":"Name","field":"full_name"},{"header":"Amount","field":"net_pay_thb"},{"header":"Ref","field":"period_name"}]')
 ON CONFLICT (country_code, bank_code) DO NOTHING;
 
--- Default users (passwords set by running: npm run db:seed:supabase)
--- Placeholder hashes replaced by gen-seed-passwords.ts
-INSERT INTO users (id, email, password_hash, role, country_scope, force_password_change) VALUES
-  ('00000000-0000-0000-0000-000000000001', 'admin@boxme.tech',        '%%HASH_ADMIN%%',  'super_admin', '*',  true),
-  ('00000000-0000-0000-0000-000000000002', 'th.hr@boxme.tech',        '%%HASH_TH_HR%%',  'hr',          'TH', true),
-  ('00000000-0000-0000-0000-000000000003', 'th.supervisor@boxme.tech','%%HASH_TH_SUP%%', 'supervisor',  'TH', true),
-  ('00000000-0000-0000-0000-000000000004', 'vn.hr@boxme.tech',        '%%HASH_VN_HR%%',  'hr',          'VN', true),
-  ('00000000-0000-0000-0000-000000000005', 'ph.hr@boxme.tech',        '%%HASH_PH_HR%%',  'hr',          'PH', true),
-  ('00000000-0000-0000-0000-000000000006', 'viewer@boxme.tech',       '%%HASH_VIEWER%%', 'viewer',      '*',  true)
-ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, force_password_change = true;
+-- Seed users are created via Supabase Auth Admin API (run: npx tsx scripts/gen-seed-passwords.ts)
+-- The trigger above auto-creates the public.users profile row when auth.users is inserted.
+-- To set roles/scopes after seeding, run:
+INSERT INTO users (id, email, role, country_scope, force_password_change)
+  SELECT id, email, 'super_admin',   '*',  true FROM auth.users WHERE email = 'admin@boxme.tech'
+  UNION ALL
+  SELECT id, email, 'country_admin', 'TH', true FROM auth.users WHERE email = 'th.admin@boxme.tech'
+  UNION ALL
+  SELECT id, email, 'hr',            'TH', true FROM auth.users WHERE email = 'th.hr@boxme.tech'
+  UNION ALL
+  SELECT id, email, 'supervisor',    'TH', true FROM auth.users WHERE email = 'th.supervisor@boxme.tech'
+  UNION ALL
+  SELECT id, email, 'country_admin', 'VN', true FROM auth.users WHERE email = 'vn.admin@boxme.tech'
+  UNION ALL
+  SELECT id, email, 'hr',            'VN', true FROM auth.users WHERE email = 'vn.hr@boxme.tech'
+  UNION ALL
+  SELECT id, email, 'supervisor',    'VN', true FROM auth.users WHERE email = 'vn.supervisor@boxme.tech'
+  UNION ALL
+  SELECT id, email, 'country_admin', 'PH', true FROM auth.users WHERE email = 'ph.admin@boxme.tech'
+  UNION ALL
+  SELECT id, email, 'hr',            'PH', true FROM auth.users WHERE email = 'ph.hr@boxme.tech'
+  UNION ALL
+  SELECT id, email, 'supervisor',    'PH', true FROM auth.users WHERE email = 'ph.supervisor@boxme.tech'
+  UNION ALL
+  SELECT id, email, 'viewer',        '*',  true FROM auth.users WHERE email = 'viewer@boxme.tech'
+ON CONFLICT (email) DO UPDATE SET
+  role = EXCLUDED.role,
+  country_scope = EXCLUDED.country_scope,
+  force_password_change = true;
+
+INSERT INTO user_warehouses (user_id, warehouse_id) VALUES
+  ('00000000-0000-0000-0000-000000000004', 'a0000000-0000-0000-0000-000000000001'),
+  ('00000000-0000-0000-0000-000000000004', 'a0000000-0000-0000-0000-000000000002')
+ON CONFLICT DO NOTHING;
 
 -- ─── Supabase Storage buckets (run manually or via dashboard) ──
 -- CREATE policy "authenticated users" on storage.objects ...

@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { apiFetch } from '../utils/apiFetch'
 
 export interface WarehouseInfo {
   id: string
@@ -42,7 +43,7 @@ export function WarehouseProvider({ children }: { children: ReactNode }) {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch('/api/warehouses', { credentials: 'include' })
+      const res = await apiFetch('/api/warehouses')
       if (res.status === 401) {
         // Not logged in yet — leave fallback in place silently.
         setLoading(false)

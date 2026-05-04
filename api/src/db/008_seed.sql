@@ -76,9 +76,19 @@ INSERT OR IGNORE INTO bank_export_templates (country_code, bank_code, bank_name,
 
 -- Default users (passwords injected by gen-seed-passwords.ts)
 INSERT OR IGNORE INTO users (id, email, password_hash, role, country_scope, force_password_change) VALUES
-  ('usr-admin',       'admin@boxme.tech',         '%%HASH_ADMIN%%',       'super_admin',   '*',  1),
-  ('usr-th-hr',       'th.hr@boxme.tech',          '%%HASH_TH_HR%%',       'hr',            'TH', 1),
-  ('usr-th-sup',      'th.supervisor@boxme.tech',  '%%HASH_TH_SUP%%',      'supervisor',    'TH', 1),
-  ('usr-vn-hr',       'vn.hr@boxme.tech',          '%%HASH_VN_HR%%',       'hr',            'VN', 1),
-  ('usr-ph-hr',       'ph.hr@boxme.tech',          '%%HASH_PH_HR%%',       'hr',            'PH', 1),
-  ('usr-viewer',      'viewer@boxme.tech',          '%%HASH_VIEWER%%',      'viewer',        '*',  1);
+  ('usr-admin',    'admin@boxme.tech',           '%%HASH_ADMIN%%',    'super_admin',   '*',  1),
+  ('usr-th-admin', 'th.admin@boxme.tech',        '%%HASH_TH_ADMIN%%', 'country_admin', 'TH', 1),
+  ('usr-th-hr',    'th.hr@boxme.tech',           '%%HASH_TH_HR%%',    'hr',            'TH', 1),
+  ('usr-th-sup',   'th.supervisor@boxme.tech',   '%%HASH_TH_SUP%%',   'supervisor',    'TH', 1),
+  ('usr-vn-admin', 'vn.admin@boxme.tech',        '%%HASH_VN_ADMIN%%', 'country_admin', 'VN', 1),
+  ('usr-vn-hr',    'vn.hr@boxme.tech',           '%%HASH_VN_HR%%',    'hr',            'VN', 1),
+  ('usr-vn-sup',   'vn.supervisor@boxme.tech',   '%%HASH_VN_SUP%%',   'supervisor',    'VN', 1),
+  ('usr-ph-admin', 'ph.admin@boxme.tech',        '%%HASH_PH_ADMIN%%', 'country_admin', 'PH', 1),
+  ('usr-ph-hr',    'ph.hr@boxme.tech',           '%%HASH_PH_HR%%',    'hr',            'PH', 1),
+  ('usr-ph-sup',   'ph.supervisor@boxme.tech',   '%%HASH_PH_SUP%%',   'supervisor',    'PH', 1),
+  ('usr-viewer',   'viewer@boxme.tech',          '%%HASH_VIEWER%%',   'viewer',        '*',  1);
+
+-- Warehouse access for TH supervisors
+INSERT OR IGNORE INTO user_warehouses (user_id, warehouse_id) VALUES
+  ('usr-th-sup', 'wh-th-bkk-1'),
+  ('usr-th-sup', 'wh-th-bkk-2');

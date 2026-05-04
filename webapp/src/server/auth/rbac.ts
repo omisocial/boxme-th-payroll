@@ -1,5 +1,5 @@
 import type { Context, Next } from 'hono'
-import { resolveSession, type AuthUser } from './index'
+import { resolveProfile, type AuthUser } from './index'
 import { getSupabase } from '../db/supabase'
 
 export type Env = {
@@ -25,21 +25,20 @@ const ROLE_RANK: Record<string, number> = {
   viewer: 20,
 }
 
-export function getSessionToken(c: HonoCtx): string | undefined {
-  const cookie = c.req.header('cookie') ?? ''
-  const match = cookie.match(/session=([^;]+)/)
-  return match?.[1]
-}
-
 export function requireAuth() {
   return async (c: HonoCtx, next: Next) => {
-    const token = getSessionToken(c)
+    const authHeader = c.req.header('Authorization') ?? ''
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : undefined
+    if (!token) return c.json({ success: false, message: 'Unauthorized' }, 401)
+
     const sb = getSupabase(c.env)
-    const user = await resolveSession(sb, token)
-    if (!user) {
-      return c.json({ success: false, message: 'Unauthorized' }, 401)
-    }
-    c.set('user', user)
+    const { data: { user: authUser }, error } = await sb.auth.getUser(token)
+    if (error || !authUser) return c.json({ success: false, message: 'Unauthorized' }, 401)
+
+    const profile = await resolveProfile(sb, authUser.id)
+    if (!profile) return c.json({ success: false, message: 'Unauthorized' }, 401)
+
+    c.set('user', profile)
     return next()
   }
 }
@@ -77,15 +76,4 @@ export function requireCountry(countryParam = 'country') {
 
 export function guard(minRole = 'viewer', countryParam = 'country') {
   return [requireAuth(), requireRole(minRole), requireCountry(countryParam)]
-}
-
-export function setSessionCookie(c: HonoCtx, token: string) {
-  c.header(
-    'Set-Cookie',
-    `session=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${24 * 3600}`
-  )
-}
-
-export function clearSessionCookie(c: HonoCtx) {
-  c.header('Set-Cookie', 'session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0')
 }
