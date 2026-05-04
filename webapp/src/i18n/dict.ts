@@ -115,6 +115,8 @@ export const DICT = {
   'map.field.otAfter': { en: 'OT after (hours)', vi: 'OT sau (giờ)', th: 'OT หลัง (ชม.)' },
   'map.field.damage': { en: 'Damage deduction', vi: 'Khấu trừ damage', th: 'หักของเสียหาย' },
   'map.field.other': { en: 'Other deduction', vi: 'Khấu trừ khác', th: 'หักอื่น ๆ' },
+  'map.field.employeeCode': { en: 'Employee Code', vi: 'Mã nhân viên', th: 'รหัสพนักงาน' },
+  'map.field.nationalId': { en: 'National ID', vi: 'CCCD / CMND', th: 'หมายเลขบัตร' },
   'map.resetSaved': { en: 'Reset saved mappings', vi: 'Xoá ánh xạ đã lưu', th: 'รีเซ็ตแมปที่บันทึกไว้' },
 
   // Help

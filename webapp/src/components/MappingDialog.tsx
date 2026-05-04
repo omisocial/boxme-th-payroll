@@ -29,6 +29,8 @@ const FIELD_LABELS: Record<FieldKey, string> = {
   otAfter: 'map.field.otAfter',
   damage: 'map.field.damage',
   other: 'map.field.other',
+  employeeCode: 'map.field.employeeCode',
+  nationalId: 'map.field.nationalId',
 }
 
 export default function MappingDialog({ headers, initialMapping, mappingSource = 'default', sampleValues, onSave, onCancel }: Props) {
